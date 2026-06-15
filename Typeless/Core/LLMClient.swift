@@ -7,7 +7,7 @@ private let logger = Logger(subsystem: "com.typeless.app", category: "llm")
 ///
 /// 两种用途：
 /// - 文字模型（translate）：B 键翻译
-/// - 多模态模型（assist）：C 键处理（含选中文本 + 剪贴板图片）
+/// - 文字模型（assist）：C 键处理（语音指令 + 选中文本）
 ///
 /// 协议差异：
 /// - OpenAI: POST {base}/v1/chat/completions, body={model,messages}, header=Authorization: Bearer {key}
@@ -113,39 +113,18 @@ final class LLMClient {
         return result
     }
 
-    // MARK: - Assist (Vision Model, C key)
+    // MARK: - Assist (Text Model, C key)
 
-    /// 多模态处理：转写文字 + 上下文（选中文本 + 剪贴板图片/文字）。
-    ///
-    /// 模型选择逻辑：
-    /// - 有图片 → 用 Vision Model（多模态），需 Vision 配置可用，否则降级到 Text Model（丢图片）
-    /// - 无图片 → 用 Text Model（文字）
+    /// Ask：用转写出来的语音指令处理当前选中的文字。
     func assist(
         transcription: String,
         context: ContextCollector.CollectedContext,
         using config: LLMConfig
     ) async throws -> String {
-        let hasImage = context.clipboardImage != nil
-
-        // 解析 effective 配置：有图片用 vision，否则用 text
-        let providerRaw: String
-        let apiKey: String
-        let baseUrl: String
-        let model: String
-
-        if hasImage {
-            let useText = config.visionProviderSameAsText || config.visionProvider == "same"
-            providerRaw = useText ? config.textProvider : config.visionProvider
-            apiKey = (useText ? config.textApiKey : config.visionApiKey)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            baseUrl = useText ? config.textBaseUrl : config.visionBaseUrl
-            model = config.visionModel
-        } else {
-            providerRaw = config.textProvider
-            apiKey = config.textApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-            baseUrl = config.textBaseUrl
-            model = config.textModel
-        }
+        let providerRaw = config.textProvider
+        let apiKey = config.textApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseUrl = config.textBaseUrl
+        let model = config.textModel
 
         guard apiKey.isEmpty == false || isLocalProvider(providerRaw) else {
             throw LLMError.notConfigured
@@ -154,41 +133,21 @@ final class LLMClient {
         let provider = Provider(rawValue: providerRaw) ?? .openai
 
         let systemPrompt = """
-        You are a helpful assistant. The user spoke (transcribed below) and may have provided \
-        additional context (selected text, clipboard image/text). Respond concisely and helpfully. \
-        Respond in the same language the user spoke.
+        You are a helpful assistant. The user spoke an instruction and selected text in the active app. \
+        Apply the spoken instruction only to the selected text. Respond in the same language the user spoke.
         """
 
-        // 构建消息内容
-        var userContent = "Spoken text: \(transcription)"
+        var userContent = "Spoken instruction: \(transcription)"
 
         if let selected = context.selectedText, selected.isEmpty == false {
             userContent += "\n\nSelected text: \(selected)"
         }
-        if let clipboardText = context.clipboardText, clipboardText.isEmpty == false {
-            userContent += "\n\nClipboard text: \(clipboardText)"
-        }
 
-        let messages: [[String: Any]]
-        if let imageData = context.clipboardImage {
-            // 有图片：用多模态格式
-            let imageBase64 = imageData.base64EncodedString()
-            messages = [
-                ["role": "system", "content": systemPrompt],
-                ["role": "user", "content": [
-                    ["type": "text", "text": userContent],
-                    ["type": "image_url", "image_url": ["url": "data:image/png;base64,\(imageBase64)"]]
-                ]]
-            ]
-            logger.info("Assist with image (\(imageData.count) bytes) + text [\(providerRaw)/\(model)]")
-        } else {
-            // 纯文字
-            messages = [
-                ["role": "system", "content": systemPrompt],
-                ["role": "user", "content": userContent]
-            ]
-            logger.info("Assist text only [\(providerRaw)/\(model)]")
-        }
+        let messages: [[String: Any]] = [
+            ["role": "system", "content": systemPrompt],
+            ["role": "user", "content": userContent]
+        ]
+        logger.info("Assist text only [\(providerRaw)/\(model)], selected=\(context.selectedText?.count ?? 0) chars")
 
         let result = try await chatCompletion(
             provider: provider,

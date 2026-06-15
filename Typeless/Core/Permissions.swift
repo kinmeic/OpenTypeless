@@ -30,23 +30,69 @@ final class Permissions: ObservableObject {
     @Published var audioDevices: [AudioDevice] = []
 
     private var timer: Timer?
+    private var permissionRefreshBurstTimer: Timer?
+    private var permissionRefreshBurstTicks = 0
+    private var appActivationObserver: NSObjectProtocol?
 
     private init() {
         refreshAll()
-        // Poll for permission changes (user may grant in System Settings)
-        timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.refreshAll()
-            }
-        }
+        startSteadyPermissionPolling()
+        observeAppActivation()
     }
 
     func refreshAll() {
+        refreshPermissionStatuses()
+        audioDevices = listAudioInputDevices()
+    }
+
+    func refreshPermissionStatuses() {
         accessibilityGranted = AXIsProcessTrusted()
         inputMonitoringGranted = checkInputMonitoring()
         microphoneGranted = checkMicrophone()
         speechRecognitionGranted = checkSpeechRecognition()
-        audioDevices = listAudioInputDevices()
+    }
+
+    private func startSteadyPermissionPolling() {
+        let timer = Timer(timeInterval: 2.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.refreshPermissionStatuses()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    private func observeAppActivation() {
+        appActivationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.refreshAll()
+                self?.startPermissionRefreshBurst()
+            }
+        }
+    }
+
+    private func startPermissionRefreshBurst() {
+        permissionRefreshBurstTimer?.invalidate()
+        permissionRefreshBurstTicks = 0
+
+        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.refreshPermissionStatuses()
+                self.permissionRefreshBurstTicks += 1
+
+                if self.permissionRefreshBurstTicks >= 60 {
+                    self.permissionRefreshBurstTimer?.invalidate()
+                    self.permissionRefreshBurstTimer = nil
+                }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        permissionRefreshBurstTimer = timer
     }
 
     // MARK: - Checkers
@@ -70,6 +116,7 @@ final class Permissions: ObservableObject {
             kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true
         ] as CFDictionary
         accessibilityGranted = AXIsProcessTrustedWithOptions(options)
+        startPermissionRefreshBurst()
         if !accessibilityGranted {
             openAccessibilitySettings()
         }
@@ -77,6 +124,7 @@ final class Permissions: ObservableObject {
 
     func requestInputMonitoring() {
         inputMonitoringGranted = CGRequestListenEventAccess()
+        startPermissionRefreshBurst()
         if !inputMonitoringGranted {
             openInputMonitoringSettings()
         }

@@ -13,7 +13,7 @@ private let logger = Logger(subsystem: "com.typeless.app", category: "pipeline")
 /// The key pressed on STOP determines which pipeline runs:
 ///   A = Dictate (speech → text → inject)
 ///   B = Translate (speech → text → LLM translate → inject)
-///   C = Assist (speech → text + context → LLM multimodal → inject)
+///   C = Assist (speech → text + selected text → LLM → overlay)
 ///
 /// ASR 采用非实时（batch）模式：录完整段音频落盘后，PROCESSING 阶段一次性转写。
 @MainActor
@@ -118,6 +118,7 @@ final class Pipeline: ObservableObject {
         silenceTimer = nil
         cleanupRecordingFile()
         RecordingOverlay.shared.hide()
+        ProcessingOverlay.shared.hide()
     }
 
     func clearError() {
@@ -186,6 +187,12 @@ final class Pipeline: ObservableObject {
         if settings.playInteractionSound { soundFeedback.playEnd() }
 
         phase = .processing(action: action)
+        ProcessingOverlay.shared.show(pipeline: self)
+        defer {
+            ProcessingOverlay.shared.hide()
+            cleanupRecordingFile()
+            phase = .idle
+        }
 
         do {
             // 非实时转写：创建引擎，调 transcribeFile
@@ -231,8 +238,15 @@ final class Pipeline: ObservableObject {
                 }
 
             case .assist:
-                // C：采集上下文 + LLM 处理，结果以弹窗显示（不注入文本框）
+                // C：采集选中文本 + LLM 处理，结果以弹窗显示（不注入文本框）
                 let ctx = await context.collect()
+                guard ctx.isEmpty == false else {
+                    throw NSError(
+                        domain: "Typeless",
+                        code: 2,
+                        userInfo: [NSLocalizedDescriptionKey: "No selected text detected. Select text in the target app and try Ask again."]
+                    )
+                }
                 let answer = try await assist(transcription: text, context: ctx)
                 ResultOverlay.shared.show(answer: answer)
             }
@@ -240,9 +254,6 @@ final class Pipeline: ObservableObject {
             logger.error("Processing failed: \(error.localizedDescription)")
             lastError = error.localizedDescription
         }
-
-        cleanupRecordingFile()
-        phase = .idle
     }
 
     // MARK: - Recording File Helpers

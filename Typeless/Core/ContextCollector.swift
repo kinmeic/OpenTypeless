@@ -1,49 +1,33 @@
 import Foundation
-import AppKit
 import ApplicationServices
 import os.log
 
 private let logger = Logger(subsystem: "com.typeless.app", category: "context")
 
-/// C 流程的上下文采集：选中文本 / 剪贴板图片 / 剪贴板文字。
+/// C 流程的上下文采集：只读取当前焦点上下文中的选中文本。
 ///
-/// 参照 Typeless ContextHelper + InputHelper.getSelectedText。
-/// 读选中文本优先用 AX API（无副作用），失败降级模拟 ⌘C（有副作用，需 save/restore 剪贴板）。
+/// 只使用 Accessibility API，不读取或改写剪贴板。
 @MainActor
 final class ContextCollector {
     struct CollectedContext {
         var selectedText: String?
-        var clipboardText: String?
-        var clipboardImage: Data?
 
         var isEmpty: Bool {
-            (selectedText?.isEmpty ?? true)
-                && (clipboardText?.isEmpty ?? true)
-                && clipboardImage == nil
+            selectedText?.isEmpty ?? true
         }
     }
 
     func collect() async -> CollectedContext {
         var ctx = CollectedContext()
 
-        // 1. 选中文本：优先 AX API（无副作用）
         if let axText = axSelectedText() {
             ctx.selectedText = axText
             logger.info("Selected text via AX: \(axText.count) chars")
+        } else if AXIsProcessTrusted() {
+            logger.warning("No selected text available through AX")
         } else {
-            // 降级：模拟 ⌘C 读剪贴板（有副作用，需 save/restore）
-            if let copiedText = await selectedTextBySimulateCopy() {
-                ctx.selectedText = copiedText
-                logger.info("Selected text via ⌘C: \(copiedText.count) chars")
-            }
+            logger.error("Accessibility permission not granted")
         }
-
-        // 2. 剪贴板文字
-        ctx.clipboardText = NSPasteboard.general.string(forType: .string)
-
-        // 3. 剪贴板图片
-        ctx.clipboardImage = NSPasteboard.general.data(forType: .tiff)
-            ?? NSPasteboard.general.data(forType: .png)
 
         return ctx
     }
@@ -53,7 +37,27 @@ final class ContextCollector {
     /// 通过 AX API 读焦点元素的选中文本。无副作用。
     private func axSelectedText() -> String? {
         guard AXIsProcessTrusted() else { return nil }
+        guard let focused = focusedElement() else { return nil }
 
+        for element in candidateElements(startingAt: focused) {
+            if let selected = selectedTextAttribute(from: element) {
+                return selected
+            }
+            if let selected = selectedTextRange(from: element) {
+                return selected
+            }
+            if let selected = selectedTextRanges(from: element) {
+                return selected
+            }
+            if let selected = selectedTextMarkerRange(from: element) {
+                return selected
+            }
+        }
+
+        return nil
+    }
+
+    private func focusedElement() -> AXUIElement? {
         var focusedRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(
             AXUIElementCreateSystemWide(),
@@ -62,107 +66,104 @@ final class ContextCollector {
         ) == .success else {
             return nil
         }
-        let focused = focusedRef as! AXUIElement
+        return (focusedRef as! AXUIElement)
+    }
 
+    private func candidateElements(startingAt element: AXUIElement) -> [AXUIElement] {
+        var elements: [AXUIElement] = []
+        var current: AXUIElement? = element
+
+        for _ in 0..<8 {
+            guard let candidate = current else { break }
+            elements.append(candidate)
+
+            var parentRef: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(
+                candidate,
+                kAXParentAttribute as CFString,
+                &parentRef
+            ) == .success else {
+                break
+            }
+            current = (parentRef as! AXUIElement)
+        }
+
+        return elements
+    }
+
+    private func selectedTextAttribute(from element: AXUIElement) -> String? {
         var selectedTextRaw: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(
-            focused,
+            element,
             kAXSelectedTextAttribute as CFString,
             &selectedTextRaw
         )
 
-        guard result == .success,
-              let selectedText = selectedTextRaw as? String,
-              selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
-            return nil
-        }
-        return selectedText
+        guard result == .success, let selectedText = selectedTextRaw as? String else { return nil }
+        return nonEmpty(selectedText)
     }
 
-    // MARK: - Simulated ⌘C (has side effects, wrapped in save/restore)
+    private func selectedTextRange(from element: AXUIElement) -> String? {
+        var rangeRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            element,
+            kAXSelectedTextRangeAttribute as CFString,
+            &rangeRef
+        ) == .success, let rangeValue = rangeRef else { return nil }
 
-    /// 模拟 ⌘C 读选中文本。有副作用（会污染剪贴板），必须 save/restore。
-    private func selectedTextBySimulateCopy() async -> String? {
-        let pasteboard = NSPasteboard.general
-        let snapshot = savePasteboard(pasteboard)
-        defer {
-            // 延迟还原，确保 ⌘C 完成后再还原
-            Task {
-                try? await Task.sleep(for: .milliseconds(150))
-                restorePasteboard(snapshot, to: pasteboard)
-            }
-        }
-
-        // 清空剪贴板，确保读到的是本次 ⌘C 的内容
-        pasteboard.clearContents()
-
-        // 模拟 ⌘C
-        simulateCmdC()
-        try? await Task.sleep(for: .milliseconds(200))
-
-        // 读剪贴板
-        let text = pasteboard.string(forType: .string)
-        return text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? text : nil
+        return stringForRange(rangeValue, from: element)
     }
 
-    // MARK: - Simulate ⌘C
+    private func selectedTextRanges(from element: AXUIElement) -> String? {
+        var rangesRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            element,
+            kAXSelectedTextRangesAttribute as CFString,
+            &rangesRef
+        ) == .success, let ranges = rangesRef as? [CFTypeRef] else { return nil }
 
-    private func simulateCmdC() {
-        let source = CGEventSource(stateID: .hidSystemState)
-        guard let source else { return }
-
-        let cmdKeyCode: CGKeyCode = 0x37
-        let cKeyCode: CGKeyCode = 0x08
-
-        guard let cmdDown = CGEvent(keyboardEventSource: source, virtualKey: cmdKeyCode, keyDown: true),
-              let cDown   = CGEvent(keyboardEventSource: source, virtualKey: cKeyCode, keyDown: true),
-              let cUp     = CGEvent(keyboardEventSource: source, virtualKey: cKeyCode, keyDown: false),
-              let cmdUp   = CGEvent(keyboardEventSource: source, virtualKey: cmdKeyCode, keyDown: false)
-        else { return }
-
-        cDown.flags = .maskCommand
-        cUp.flags = .maskCommand
-
-        cmdDown.post(tap: .cghidEventTap)
-        cDown.post(tap: .cghidEventTap)
-        cUp.post(tap: .cghidEventTap)
-        cmdUp.post(tap: .cghidEventTap)
+        let parts = ranges.compactMap { stringForRange($0, from: element) }
+        return nonEmpty(parts.joined(separator: "\n"))
     }
 
-    // MARK: - Pasteboard Snapshot (same as TextInjector)
+    private func stringForRange(_ rangeValue: CFTypeRef, from element: AXUIElement) -> String? {
+        var stringRef: CFTypeRef?
+        let result = AXUIElementCopyParameterizedAttributeValue(
+            element,
+            kAXStringForRangeParameterizedAttribute as CFString,
+            rangeValue,
+            &stringRef
+        )
 
-    private struct PasteboardSnapshot {
-        let items: [[NSPasteboard.PasteboardType: Data]]
+        guard result == .success, let selectedText = stringRef as? String else { return nil }
+        return nonEmpty(selectedText)
     }
 
-    private func savePasteboard(_ pasteboard: NSPasteboard) -> PasteboardSnapshot {
-        let items = pasteboard.pasteboardItems?.map { item -> [NSPasteboard.PasteboardType: Data] in
-            Dictionary(uniqueKeysWithValues: item.types.compactMap { type -> (NSPasteboard.PasteboardType, Data)? in
-                guard let data = item.data(forType: type) else { return nil }
-                return (type, data)
-            })
-        } ?? []
-        return PasteboardSnapshot(items: items)
+    private func selectedTextMarkerRange(from element: AXUIElement) -> String? {
+        let markerRangeAttribute = "AXSelectedTextMarkerRange" as CFString
+        let stringForMarkerRangeAttribute = "AXStringForTextMarkerRange" as CFString
+
+        var markerRangeRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            element,
+            markerRangeAttribute,
+            &markerRangeRef
+        ) == .success, let markerRange = markerRangeRef else { return nil }
+
+        var stringRef: CFTypeRef?
+        let result = AXUIElementCopyParameterizedAttributeValue(
+            element,
+            stringForMarkerRangeAttribute,
+            markerRange,
+            &stringRef
+        )
+
+        guard result == .success, let selectedText = stringRef as? String else { return nil }
+        return nonEmpty(selectedText)
     }
 
-    private func restorePasteboard(_ snapshot: PasteboardSnapshot, to pasteboard: NSPasteboard) {
-        pasteboard.clearContents()
-        let items = snapshot.items.map { dict in
-            NSPasteboardItem().then { item in
-                for (type, data) in dict {
-                    item.setData(data, forType: type)
-                }
-            }
-        }
-        if items.isEmpty == false {
-            pasteboard.writeObjects(items)
-        }
-    }
-}
-
-private extension NSPasteboardItem {
-    func then(_ configure: (NSPasteboardItem) -> Void) -> NSPasteboardItem {
-        configure(self)
-        return self
+    private func nonEmpty(_ text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : text
     }
 }

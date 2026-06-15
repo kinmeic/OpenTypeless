@@ -1,5 +1,6 @@
 import SwiftUI
 import CoreAudio
+import AppKit
 
 struct SettingsWindow: View {
     @EnvironmentObject private var appSettings: AppSettings
@@ -122,7 +123,11 @@ struct SettingsGeneralTab: View {
         }
         .formStyle(.grouped)
         .onAppear {
+            permissions.refreshAll()
             inputDevices = AudioDeviceManager.inputDevices()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            permissions.refreshAll()
         }
         .onDisappear {
             // 离开设置页时停止监测，释放麦克风
@@ -384,6 +389,8 @@ struct ShortcutRecorder: View {
                 .padding(.vertical, 4)
                 .background(isRecording ? Color.yellow.opacity(0.2) : Color.clear)
                 .cornerRadius(6)
+
+            Spacer()
 
             Button(isRecording ? "Recording..." : "Record") {
                 if isRecording {

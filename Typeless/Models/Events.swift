@@ -18,8 +18,6 @@ struct KeyEvent {
 
 struct CollectedContext {
     var selectedText: String?
-    var clipboardText: String?
-    var clipboardImage: Data?
 }
 
 struct StreamEvent {

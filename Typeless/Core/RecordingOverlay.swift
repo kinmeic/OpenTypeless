@@ -74,3 +74,64 @@ final class RecordingOverlay {
         panel.setFrameOrigin(NSPoint(x: x, y: y))
     }
 }
+
+/// 处理浮层管理：录音停止后，在转写/翻译/Ask 阶段显示同风格的处理中状态。
+@MainActor
+final class ProcessingOverlay {
+    static let shared = ProcessingOverlay()
+
+    private var panel: NSPanel?
+
+    func show(pipeline: Pipeline) {
+        if panel == nil {
+            createPanel(pipeline: pipeline)
+        }
+        guard let panel else { return }
+
+        positionAtBottomCenter(panel)
+
+        if !panel.isVisible {
+            panel.orderFrontRegardless()
+            logger.info("Processing overlay shown")
+        }
+    }
+
+    func hide() {
+        guard let panel, panel.isVisible else { return }
+        panel.orderOut(nil)
+        logger.info("Processing overlay hidden")
+    }
+
+    private func createPanel(pipeline: Pipeline) {
+        let size = NSSize(width: 340, height: 70)
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: size.width, height: size.height),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.isFloatingPanel = true
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        panel.hidesOnDeactivate = false
+        panel.isMovable = false
+
+        let hosting = NSHostingView(rootView: ProcessingOverlayView().environmentObject(pipeline))
+        panel.contentView = hosting
+
+        self.panel = panel
+    }
+
+    private func positionAtBottomCenter(_ panel: NSPanel) {
+        guard let screen = NSScreen.main else { return }
+        let screenFrame = screen.visibleFrame
+        let size = panel.frame.size
+        let x = screenFrame.midX - size.width / 2
+        let y = screenFrame.minY + 60
+        panel.setFrameOrigin(NSPoint(x: x, y: y))
+    }
+}
