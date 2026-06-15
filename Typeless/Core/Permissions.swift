@@ -123,11 +123,43 @@ final class Permissions: ObservableObject {
     }
 
     func requestInputMonitoring() {
+        createInputMonitoringTCCEntry()
         inputMonitoringGranted = CGRequestListenEventAccess()
         startPermissionRefreshBurst()
         if !inputMonitoringGranted {
-            openInputMonitoringSettings()
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(700))
+                self.refreshPermissionStatuses()
+                if !self.inputMonitoringGranted {
+                    self.openInputMonitoringSettings()
+                }
+            }
         }
+    }
+
+    /// Creating an actual listen-only event tap helps macOS create the Input Monitoring
+    /// TCC entry before we send the user to System Settings.
+    private func createInputMonitoringTCCEntry() {
+        let mask = (1 << CGEventType.keyDown.rawValue)
+            | (1 << CGEventType.keyUp.rawValue)
+            | (1 << CGEventType.flagsChanged.rawValue)
+
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .listenOnly,
+            eventsOfInterest: CGEventMask(mask),
+            callback: { _, _, event, _ in
+                Unmanaged.passUnretained(event)
+            },
+            userInfo: nil
+        ) else {
+            logger.warning("Input Monitoring probe event tap failed; requesting TCC access")
+            return
+        }
+
+        CGEvent.tapEnable(tap: tap, enable: false)
+        logger.info("Input Monitoring probe event tap created")
     }
 
     func requestMicrophone(completion: ((Bool) -> Void)? = nil) {
