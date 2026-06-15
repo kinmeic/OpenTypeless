@@ -8,7 +8,7 @@ private let logger = Logger(subsystem: "com.typeless.app", category: "asr-system
 /// 系统语音识别引擎（非实时 batch 模式）。
 ///
 /// 特性：
-/// - 多语言串行识别（对每个配置语言各跑一次 `SFSpeechURLRecognitionRequest`，取最长结果）
+/// - 使用设置里选择的单一识别语言，避免不同 locale 之间互相误判
 /// - 强制 on-device 识别（不上传 Apple 云端，保护隐私）
 /// - 自动加标点（macOS 14+）
 ///
@@ -24,14 +24,12 @@ final class SystemSpeechASR: ASREngine {
             case .notAuthorized:
                 return "Speech Recognition is not authorized."
             case .recognizerUnavailable:
-                return "No on-device speech recognizer available for the configured languages."
+                return "No speech recognizer is available for the configured language."
             case .emptyResult:
                 return "No speech text was recognized."
             }
         }
     }
-
-    private let queue = DispatchQueue(label: "Typeless.SystemSpeechASR")
 
     private let config: ASRConfig
 
@@ -42,39 +40,25 @@ final class SystemSpeechASR: ASREngine {
     // MARK: - Batch (non-realtime) transcription
 
     /// 非实时转写：对整段音频文件做一次性识别。
-    /// 对每个配置语言各跑一次 `SFSpeechURLRecognitionRequest`，取最长结果。
+    /// 使用设置里选择的 `recognitionLanguageID` 创建对应 locale 的识别器。
     func transcribeFile(_ url: URL) async throws -> String {
         guard SFSpeechRecognizer.authorizationStatus() == .authorized else {
             throw ASError.notAuthorized
         }
 
-        let recognizers = config.languageIDs.compactMap { languageID -> (String, SFSpeechRecognizer)? in
-            guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: languageID)),
-                  recognizer.isAvailable else {
-                logger.warning("Recognizer for \(languageID) unavailable")
-                return nil
-            }
-            return (languageID, recognizer)
-        }
-        guard recognizers.isEmpty == false else {
+        let languageID = config.recognitionLanguageID
+        guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: languageID)),
+              recognizer.isAvailable else {
+            logger.warning("Recognizer for \(languageID) unavailable")
             throw ASError.recognizerUnavailable
         }
 
-        // 串行跑各语言，取最长结果（准确率优先于并行速度）
-        var best: (language: String, text: String) = ("", "")
-        for (languageID, recognizer) in recognizers {
-            let text = await transcribe(url: url, with: recognizer, languageID: languageID)
-            logger.info("SystemSpeechASR [\(languageID)]: \(text.count) chars")
-            if text.count > best.text.count {
-                best = (languageID, text)
-            }
-        }
-
-        let trimmed = best.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = await transcribe(url: url, with: recognizer, languageID: languageID)
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty == false else {
             throw ASError.emptyResult
         }
-        logger.info("SystemSpeechASR result: \(trimmed.count) chars [\(best.language)]")
+        logger.info("SystemSpeechASR result: \(trimmed.count) chars [\(languageID)]")
         return trimmed
     }
 

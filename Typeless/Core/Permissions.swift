@@ -82,11 +82,12 @@ final class Permissions: ObservableObject {
         }
     }
 
-    func requestMicrophone() {
+    func requestMicrophone(completion: ((Bool) -> Void)? = nil) {
         AVAudioApplication.requestRecordPermission { [weak self] granted in
             Task { @MainActor in
                 self?.microphoneGranted = granted
                 logger.info("Microphone permission: \(granted)")
+                completion?(granted)
             }
         }
     }

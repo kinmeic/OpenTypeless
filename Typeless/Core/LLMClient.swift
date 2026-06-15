@@ -47,6 +47,43 @@ final class LLMClient {
 
     private let session = URLSession.shared
 
+    /// 共享的语音转写加工提示词（A 键加工、B 键翻译前加工都复用）。
+    private static let refinePrompt = """
+    你是语音转写文字的整理助手。对下面的转写文字进行加工：\
+    1. 自动去除像“呃”、“嗯”等填充词。\
+    2. 去除讲话中不必要和重复的词汇，确保语言简洁易懂。\
+    3. 将口述的列表、步骤和要点整理成干净、结构化的文本，省去手动格式化的麻烦。\
+    保留原意，不添加未提及的信息。
+    """
+
+    // MARK: - Refine (Text Model, A key 后处理)
+
+    /// 加工语音转写文字：去填充词、去重复、结构化整理。
+    /// 仅在配置了 Text Model 时调用；未配置应直接返回原始文字（调用方判断）。
+    func refine(_ raw: String, using config: LLMConfig) async throws -> String {
+        let apiKey = config.textApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard apiKey.isEmpty == false || isLocalProvider(config.textProvider) else {
+            throw LLMError.notConfigured
+        }
+
+        let provider = Provider(rawValue: config.textProvider) ?? .openai
+        let systemPrompt = Self.refinePrompt + "直接返回加工后的文字，不要任何解释或前后缀。"
+
+        let messages: [[String: Any]] = [
+            ["role": "system", "content": systemPrompt],
+            ["role": "user", "content": raw]
+        ]
+
+        return try await chatCompletion(
+            provider: provider,
+            baseUrl: config.textBaseUrl,
+            apiKey: apiKey,
+            model: config.textModel,
+            messages: messages,
+            temperature: 0.2
+        )
+    }
+
     // MARK: - Translate (Text Model, B key)
 
     /// 翻译文本到目标语言。
@@ -57,11 +94,7 @@ final class LLMClient {
         }
 
         let provider = Provider(rawValue: config.textProvider) ?? .openai
-        let systemPrompt = """
-        Translate the following text into \(targetLanguage). \
-        If the source text is already in \(targetLanguage), return it unchanged. \
-        Return only the translation, no explanations.
-        """
+        let systemPrompt = Self.refinePrompt + "\n另外，请将加工后的文字翻译成\(targetLanguage)。如果原文已经是\(targetLanguage)，则保持不变。直接返回加工并翻译后的最终结果，不要任何解释或前后缀。"
 
         let messages: [[String: Any]] = [
             ["role": "system", "content": systemPrompt],
@@ -83,22 +116,42 @@ final class LLMClient {
     // MARK: - Assist (Vision Model, C key)
 
     /// 多模态处理：转写文字 + 上下文（选中文本 + 剪贴板图片/文字）。
+    ///
+    /// 模型选择逻辑：
+    /// - 有图片 → 用 Vision Model（多模态），需 Vision 配置可用，否则降级到 Text Model（丢图片）
+    /// - 无图片 → 用 Text Model（文字）
     func assist(
         transcription: String,
         context: ContextCollector.CollectedContext,
         using config: LLMConfig
     ) async throws -> String {
-        let useTextConfig = config.visionProviderSameAsText
-        let providerRaw = useTextConfig ? config.textProvider : config.visionProvider
-        let apiKey = (useTextConfig ? config.textApiKey : config.visionApiKey)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasImage = context.clipboardImage != nil
+
+        // 解析 effective 配置：有图片用 vision，否则用 text
+        let providerRaw: String
+        let apiKey: String
+        let baseUrl: String
+        let model: String
+
+        if hasImage {
+            let useText = config.visionProviderSameAsText || config.visionProvider == "same"
+            providerRaw = useText ? config.textProvider : config.visionProvider
+            apiKey = (useText ? config.textApiKey : config.visionApiKey)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            baseUrl = useText ? config.textBaseUrl : config.visionBaseUrl
+            model = config.visionModel
+        } else {
+            providerRaw = config.textProvider
+            apiKey = config.textApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            baseUrl = config.textBaseUrl
+            model = config.textModel
+        }
+
         guard apiKey.isEmpty == false || isLocalProvider(providerRaw) else {
             throw LLMError.notConfigured
         }
 
         let provider = Provider(rawValue: providerRaw) ?? .openai
-        let baseUrl = useTextConfig ? config.textBaseUrl : config.visionBaseUrl
-        let model = config.visionModel
 
         let systemPrompt = """
         You are a helpful assistant. The user spoke (transcribed below) and may have provided \
@@ -106,7 +159,7 @@ final class LLMClient {
         Respond in the same language the user spoke.
         """
 
-        // 构建多模态消息内容
+        // 构建消息内容
         var userContent = "Spoken text: \(transcription)"
 
         if let selected = context.selectedText, selected.isEmpty == false {
@@ -127,14 +180,14 @@ final class LLMClient {
                     ["type": "image_url", "image_url": ["url": "data:image/png;base64,\(imageBase64)"]]
                 ]]
             ]
-            logger.info("Assist with image (\(imageData.count) bytes) + text")
+            logger.info("Assist with image (\(imageData.count) bytes) + text [\(providerRaw)/\(model)]")
         } else {
             // 纯文字
             messages = [
                 ["role": "system", "content": systemPrompt],
                 ["role": "user", "content": userContent]
             ]
-            logger.info("Assist text only")
+            logger.info("Assist text only [\(providerRaw)/\(model)]")
         }
 
         let result = try await chatCompletion(
@@ -245,11 +298,39 @@ final class LLMClient {
                 .first?["text"] as? String
         }
 
-        guard let text = content?.trimmingCharacters(in: .whitespacesAndNewlines),
-              text.isEmpty == false else {
+        guard let raw = content?.trimmingCharacters(in: .whitespacesAndNewlines),
+              raw.isEmpty == false else {
+            throw LLMError.emptyContent
+        }
+        // 过滤 <think>...</think> 思考过程标签（深度思考模型如 DeepSeek-R1 会输出）
+        let text = Self.stripThinkTags(raw).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.isEmpty == false else {
             throw LLMError.emptyContent
         }
         return text
+    }
+
+    /// 移除大模型输出中的 <think>...</think> 思考过程标签。
+    /// 处理：成对标签（含多行）、未闭合的开标签（到文末）。
+    private static func stripThinkTags(_ text: String) -> String {
+        var result = text
+        // 成对的 <think>...</think>（DOTALL：跨行匹配），非贪婪
+        if let regex = try? NSRegularExpression(pattern: "<think>.*?</think>", options: [.dotMatchesLineSeparators]) {
+            result = regex.stringByReplacingMatches(
+                in: result,
+                range: NSRange(result.startIndex..., in: result),
+                withTemplate: ""
+            )
+        }
+        // 残留的未闭合 <think>（从开标签到字符串结尾）
+        if let regex = try? NSRegularExpression(pattern: "<think>.*", options: [.dotMatchesLineSeparators]) {
+            result = regex.stringByReplacingMatches(
+                in: result,
+                range: NSRange(result.startIndex..., in: result),
+                withTemplate: ""
+            )
+        }
+        return result
     }
 
     // MARK: - Helpers

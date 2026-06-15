@@ -30,6 +30,8 @@ final class Pipeline: ObservableObject {
         case assist = "C"
     }
 
+    typealias TestOutputHandler = @MainActor (String) -> Void
+
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var lastError: String? {
         didSet {
@@ -87,12 +89,20 @@ final class Pipeline: ObservableObject {
     // MARK: - Public
 
     func handleShortcut(action: Action) {
+        handleAction(action: action, testOutput: nil)
+    }
+
+    func handleTestAction(action: Action, output: @escaping TestOutputHandler) {
+        handleAction(action: action, testOutput: output)
+    }
+
+    private func handleAction(action: Action, testOutput: TestOutputHandler?) {
         switch phase {
         case .idle:
             recordingTask = Task { await startRecording() }
         case .recording:
             recordingTask?.cancel()
-            recordingTask = Task { await stopAndProcess(action: action) }
+            recordingTask = Task { await stopAndProcess(action: action, testOutput: testOutput) }
         case .processing:
             // Ignore while processing
             break
@@ -158,7 +168,7 @@ final class Pipeline: ObservableObject {
         }
     }
 
-    private func stopAndProcess(action: Action) async {
+    private func stopAndProcess(action: Action, testOutput: TestOutputHandler? = nil) async {
         guard phase == .recording else { return }
         logger.info("Stopping recording, action=\(action.rawValue)")
 
@@ -193,13 +203,32 @@ final class Pipeline: ObservableObject {
             // 根据动作执行后处理
             switch action {
             case .dictate:
-                // A：直接注入转写文字
-                await injector.insert(text)
+                // A：配置了 Text Model 时先用 LLM 加工（去填充词/重复/结构化），否则直接注入
+                let finalText: String
+                if textModelConfigured {
+                    do {
+                        finalText = try await llm.refine(text, using: settings.llm)
+                    } catch {
+                        logger.warning("Refine failed, using raw transcript: \(error.localizedDescription)")
+                        finalText = text
+                    }
+                } else {
+                    finalText = text
+                }
+                if let testOutput {
+                    testOutput(finalText)
+                } else {
+                    await injector.insert(finalText)
+                }
 
             case .translate:
                 // B：翻译后注入
                 let translated = try await translate(text)
-                await injector.insert(translated)
+                if let testOutput {
+                    testOutput(translated)
+                } else {
+                    await injector.insert(translated)
+                }
 
             case .assist:
                 // C：采集上下文 + LLM 处理，结果以弹窗显示（不注入文本框）
@@ -254,6 +283,13 @@ final class Pipeline: ObservableObject {
         if level > 0.08 {
             lastVoiceTime = Date()
         }
+    }
+
+    /// Text Model 是否已配置（apiKey 非空或本地 provider）。
+    private var textModelConfigured: Bool {
+        let key = settings.llm.textApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let provider = settings.llm.textProvider.lowercased()
+        return !key.isEmpty || provider == "ollama" || provider == "lm-studio" || provider == "local"
     }
 
     // MARK: - ASR Engine Factory

@@ -23,6 +23,10 @@ struct SettingsWindow: View {
                 .tabItem {
                     Label("Shortcuts", systemImage: "keyboard")
                 }
+            SettingsTestTab()
+                .tabItem {
+                    Label("Test", systemImage: "play.circle")
+                }
         }
         .padding()
         .frame(minWidth: 600, minHeight: 450)
@@ -54,7 +58,7 @@ struct SettingsGeneralTab: View {
                 PermissionRow(
                     label: "Microphone",
                     granted: permissions.microphoneGranted,
-                    action: permissions.requestMicrophone
+                    action: { permissions.requestMicrophone() }
                 )
                 PermissionRow(
                     label: "Speech Recognition",
@@ -97,10 +101,7 @@ struct SettingsGeneralTab: View {
                         if levelMonitor.isRunning {
                             levelMonitor.stop()
                         } else {
-                            let id = AudioDeviceID(appSettings.audioInputDeviceID) ?? 0
-                            levelMonitor.start(deviceID: id)
-                            // 触发权限刷新（Test Input 会请求麦克风权限）
-                            Task { @MainActor in Permissions.shared.refreshAll() }
+                            startInputTest()
                         }
                     }
                     .buttonStyle(.bordered)
@@ -129,6 +130,23 @@ struct SettingsGeneralTab: View {
                 levelMonitor.stop()
             }
         }
+    }
+
+    private func startInputTest() {
+        if permissions.microphoneGranted {
+            startLevelMonitor()
+        } else {
+            permissions.requestMicrophone { granted in
+                guard granted else { return }
+                startLevelMonitor()
+            }
+        }
+    }
+
+    private func startLevelMonitor() {
+        let id = AudioDeviceID(appSettings.audioInputDeviceID) ?? 0
+        levelMonitor.start(deviceID: id)
+        permissions.refreshAll()
     }
 }
 
@@ -302,11 +320,12 @@ struct SettingsASRTab: View {
                     Text("Uses the ASR Model configured in the LLM tab (e.g. GLM-ASR-2512 via OpenAI-compatible API).")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                } else {
-                    // 系统 STT 多语言配置
-                    Text("Languages: \(appSettings.asr.languageIDs.joined(separator: ", "))")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                } else if appSettings.asr.engine == .systemSpeech {
+                    Picker("Recognition Language", selection: $appSettings.asr.recognitionLanguageID) {
+                        ForEach(ASRConfig.supportedSystemLanguages) { language in
+                            Text(language.name).tag(language.id)
+                        }
+                    }
                     Text("On-device recognition enabled. Auto-punctuation on (macOS 14+).")
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -412,5 +431,106 @@ struct ShortcutRecorder: View {
             parts.append(keyName)
         }
         return parts.isEmpty ? "Not set" : parts.joined(separator: "+")
+    }
+}
+
+// MARK: - Test Tab
+
+/// 测试页：文本输入框（注入目标）+ 4 个按钮，方便不用快捷键也能测试完整流程。
+struct SettingsTestTab: View {
+    @EnvironmentObject private var pipeline: Pipeline
+    @EnvironmentObject private var appSettings: AppSettings
+
+    @State private var text: String = ""
+    @FocusState private var textFocused: Bool
+
+    /// 是否处于录音状态（按钮可用性判断）。
+    private var isRecording: Bool {
+        if case .recording = pipeline.phase { return true }
+        return false
+    }
+
+    private var isProcessing: Bool {
+        if case .processing = pipeline.phase { return true }
+        return false
+    }
+
+    var body: some View {
+        Form {
+            Section("Input") {
+                TextEditor(text: $text)
+                    .frame(minHeight: 120)
+                    .focused($textFocused)
+                    .font(.body)
+
+                Text("Results are shown here for A/B.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Section("Actions") {
+                // 开始/停止录音：idle 时开始，recording 时是无效（停止由下面 3 个按钮触发）
+                Button {
+                    pipeline.handleShortcut(action: .dictate)
+                } label: {
+                    Label(isRecording ? "Recording… (use a button below to stop)" : "Start Recording", systemImage: isRecording ? "stop.circle.fill" : "mic.fill")
+                }
+                .disabled(isProcessing || isRecording)
+                .tint(isRecording ? .red : .accentColor)
+
+                // A：语音转文字（停止录音 → 转写 → 注入到文本框）
+                Button {
+                    pipeline.handleTestAction(action: .dictate) { result in
+                        appendResult(result)
+                    }
+                } label: {
+                    Label("A · Speech to Text", systemImage: "text.alignleft")
+                }
+                .disabled(isProcessing || isRecording == false)
+                .tint(.blue)
+
+                // B：翻译（停止录音 → 转写 → 翻译成目标语言 → 注入）
+                Button {
+                    pipeline.handleTestAction(action: .translate) { result in
+                        appendResult(result)
+                    }
+                } label: {
+                    Label("B · Translate (\(appSettings.targetLanguage))", systemImage: "globe")
+                }
+                .disabled(isProcessing || isRecording == false)
+                .tint(.blue)
+
+                // C：随便问（停止录音 → 转写 → 采集上下文 → LLM 处理 → 弹窗显示）
+                Button {
+                    pipeline.handleShortcut(action: .assist)
+                } label: {
+                    Label("C · Ask (result in popup)", systemImage: "sparkles")
+                }
+                .disabled(isProcessing || isRecording == false)
+                .tint(.blue)
+            }
+
+            if let err = pipeline.lastError {
+                Section("Error") {
+                    Text(err)
+                        .foregroundColor(.red)
+                        .font(.caption)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear { textFocused = true }
+    }
+
+    private func appendResult(_ result: String) {
+        let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false else { return }
+
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            text = trimmed
+        } else {
+            text += (text.hasSuffix("\n") ? "" : "\n") + trimmed
+        }
+        textFocused = true
     }
 }

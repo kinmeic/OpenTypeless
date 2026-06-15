@@ -24,11 +24,54 @@ enum ASREngineType: String, Codable, CaseIterable {
 struct ASRConfig: Codable, Equatable {
     var engine: ASREngineType = .systemSpeech
 
-    /// 系统 STT 多语言并行识别的语言列表。
-    var languageIDs: [String] = ["zh-CN", "en-US"]
+    var recognitionLanguageID: String = "zh-CN"
 
     /// 系统 STT 是否可用（权限 + recognizer 存在）。
     var systemSpeechAvailable: Bool {
         SFSpeechRecognizer.authorizationStatus() == .authorized
     }
+
+    static let supportedSystemLanguages: [ASRLanguage] = [
+        .init(id: "zh-CN", name: "中文（普通话）"),
+        .init(id: "en-US", name: "English (US)"),
+        .init(id: "ja-JP", name: "日本語"),
+        .init(id: "ko-KR", name: "한국어"),
+        .init(id: "fr-FR", name: "Français"),
+        .init(id: "de-DE", name: "Deutsch"),
+        .init(id: "es-ES", name: "Español")
+    ]
+
+    init(
+        engine: ASREngineType = .systemSpeech,
+        recognitionLanguageID: String = "zh-CN"
+    ) {
+        self.engine = engine
+        self.recognitionLanguageID = recognitionLanguageID
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case engine
+        case recognitionLanguageID
+        case languageIDs
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        engine = try container.decodeIfPresent(ASREngineType.self, forKey: .engine) ?? .systemSpeech
+        let legacyLanguageIDs = try container.decodeIfPresent([String].self, forKey: .languageIDs)
+        recognitionLanguageID = try container.decodeIfPresent(String.self, forKey: .recognitionLanguageID)
+            ?? legacyLanguageIDs?.first
+            ?? "zh-CN"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(engine, forKey: .engine)
+        try container.encode(recognitionLanguageID, forKey: .recognitionLanguageID)
+    }
+}
+
+struct ASRLanguage: Identifiable, Hashable {
+    let id: String
+    let name: String
 }
