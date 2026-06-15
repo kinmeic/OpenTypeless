@@ -101,6 +101,13 @@ struct MenuBarMenu: View {
             NSApp.activate(ignoringOtherApps: true)
         } else {
             openWindow(id: "settings")
+            // 新窗口也要激活 App，否则菜单栏 App 打开的窗口不获焦点
+            DispatchQueue.main.async {
+                NSApp.activate(ignoringOtherApps: true)
+                if let window = NSApp.windows.first(where: { $0.identifier?.rawValue == "settings" }) {
+                    window.makeKeyAndOrderFront(nil)
+                }
+            }
         }
     }
 }

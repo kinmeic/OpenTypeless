@@ -88,12 +88,18 @@ final class LLMClient {
         context: ContextCollector.CollectedContext,
         using config: LLMConfig
     ) async throws -> String {
-        let apiKey = config.visionApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard apiKey.isEmpty == false || isLocalProvider(config.visionProvider) else {
+        let useTextConfig = config.visionProviderSameAsText
+        let providerRaw = useTextConfig ? config.textProvider : config.visionProvider
+        let apiKey = (useTextConfig ? config.textApiKey : config.visionApiKey)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard apiKey.isEmpty == false || isLocalProvider(providerRaw) else {
             throw LLMError.notConfigured
         }
 
-        let provider = Provider(rawValue: config.visionProvider) ?? .openai
+        let provider = Provider(rawValue: providerRaw) ?? .openai
+        let baseUrl = useTextConfig ? config.textBaseUrl : config.visionBaseUrl
+        let model = config.visionModel
+
         let systemPrompt = """
         You are a helpful assistant. The user spoke (transcribed below) and may have provided \
         additional context (selected text, clipboard image/text). Respond concisely and helpfully. \
@@ -133,9 +139,9 @@ final class LLMClient {
 
         let result = try await chatCompletion(
             provider: provider,
-            baseUrl: config.visionBaseUrl,
+            baseUrl: baseUrl,
             apiKey: apiKey,
-            model: config.visionModel,
+            model: model,
             messages: messages,
             temperature: 0.7
         )
@@ -271,23 +277,36 @@ final class LLMClient {
     // MARK: - Test Connection (for settings UI)
 
     /// 测试连接：发送最小请求验证 provider 可达 + key 有效。
-    func testConnection(config: LLMConfig, useVisionConfig: Bool = false) async -> TestResult {
-        let provider: Provider
+    /// - Parameters:
+    ///   - config: LLM 配置
+    ///   - useVisionConfig: true 时测试 Vision Model 配置
+    ///   - useASRConfig: true 时测试 ASR Model 配置
+    func testConnection(config: LLMConfig, useVisionConfig: Bool = false, useASRConfig: Bool = false) async -> TestResult {
+        let providerRaw: String
         let apiKey: String
         let model: String
         let baseUrl: String
 
-        if useVisionConfig {
-            provider = Provider(rawValue: config.visionProvider) ?? .openai
-            apiKey = config.visionApiKey
+        if useASRConfig {
+            let useText = config.asrProviderSameAsText
+            providerRaw = useText ? config.textProvider : config.asrProvider
+            apiKey = useText ? config.textApiKey : config.asrApiKey
+            model = config.asrModel
+            baseUrl = useText ? config.textBaseUrl : config.asrBaseUrl
+        } else if useVisionConfig {
+            let useText = config.visionProviderSameAsText
+            providerRaw = useText ? config.textProvider : config.visionProvider
+            apiKey = useText ? config.textApiKey : config.visionApiKey
             model = config.visionModel
-            baseUrl = config.visionBaseUrl
+            baseUrl = useText ? config.textBaseUrl : config.visionBaseUrl
         } else {
-            provider = Provider(rawValue: config.textProvider) ?? .openai
+            providerRaw = config.textProvider
             apiKey = config.textApiKey
             model = config.textModel
             baseUrl = config.textBaseUrl
         }
+
+        let provider = Provider(rawValue: providerRaw) ?? .openai
 
         do {
             _ = try await chatCompletion(

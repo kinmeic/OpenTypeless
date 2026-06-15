@@ -5,107 +5,121 @@ import os.log
 
 private let logger = Logger(subsystem: "com.typeless.app", category: "audio")
 
-/// 音频采集器：参照 PowerMeetings NoiseSuppressingMicrophoneRecorder。
+/// 音频采集器（非实时模式）：录完整段音频并落盘 m4a。
 ///
-/// 处理链：inputNode → highPass(85Hz) → 软噪声门 → tap → onBuffer/onLevel
-/// - 高通滤波：滤除空调/风扇等低频环境噪声
+/// 基于 HALAudioInput（HAL AudioUnit），能可靠采集任意指定输入设备。
+/// 处理链：onBuffer → 软噪声门 → 写文件 + onLevel
 /// - 软噪声门：三段式（大幅衰减 → 线性过渡 → 全通），避免语音开头被截断
 /// - 音频电平：RMS → 归一化 0~1，用于菜单栏图标动画
 final class AudioRecorder {
     enum AudioError: LocalizedError {
-        case noInputFormat
         case engineStartFailed(String)
 
         var errorDescription: String? {
             switch self {
-            case .noInputFormat:
-                return "No microphone input format was available."
             case .engineStartFailed(let message):
-                return "Audio engine failed to start: \(message)"
+                return "Audio capture failed to start: \(message)"
             }
         }
     }
 
-    private let engine = AVAudioEngine()
-    private let highPass = AVAudioUnitEQ(numberOfBands: 1)
+    private let input = HALAudioInput()
     private var isRunning = false
 
-    private var onBuffer: ((AVAudioPCMBuffer) -> Void)?
+    /// 串行队列：保护 outputFile / pendingOutputURL / onLevel 等共享状态，
+    /// 避免 buffer 回调线程与 start()/stop() 调用线程的数据竞争。
+    private let stateQueue = DispatchQueue(label: "Typeless.AudioRecorder.state")
+
     private var onLevel: ((Double) -> Void)?
+    private var outputFile: AVAudioFile?
 
     /// 开始录音。
     /// - Parameters:
     ///   - inputDeviceID: 指定的输入设备（CoreAudio AudioDeviceID）。nil 用系统默认。
-    ///   - onBuffer: 每个音频 buffer 回调（喂给 ASR）。
+    ///   - recordToFile: 录音文件 URL（m4a），必须提供。
     ///   - onLevel: 音频电平 0~1，用于 UI 反馈。
     func start(
         inputDeviceID: AudioDeviceID?,
-        onBuffer: @escaping (AVAudioPCMBuffer) -> Void,
+        recordToFile: URL,
         onLevel: @escaping (Double) -> Void
     ) throws {
-        configureProcessingChain()
-
-        let inputNode = engine.inputNode
-        let inputFormat = inputNode.outputFormat(forBus: 0)
-        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
-            throw AudioError.noInputFormat
-        }
-
-        engine.attach(highPass)
-        engine.connect(inputNode, to: highPass, format: inputFormat)
-        engine.connect(highPass, to: engine.mainMixerNode, format: inputFormat)
-        // 静音输出，避免扬声器回声
-        engine.mainMixerNode.outputVolume = 0
-
-        self.onBuffer = onBuffer
         self.onLevel = onLevel
 
-        highPass.installTap(onBus: 0, bufferSize: 1_024, format: inputFormat) { [weak self] buffer, _ in
+        // 准备 m4a 输出文件（用 HALAudioInput 的实际输出格式，在第一个 buffer 时确定）
+        self.pendingOutputURL = recordToFile
+        logger.info("Recording to file: \(recordToFile.lastPathComponent)")
+
+        input.onBuffer = { [weak self] buffer in
             guard let self else { return }
-            self.applySoftNoiseGate(to: buffer)
-            let level = AudioMeterCalculator.audioLevel(from: buffer)
-            self.onLevel?(level)
-            self.onBuffer?(buffer)
+            // 派到串行队列，保证与 stop() 的状态清空不交错
+            self.stateQueue.async {
+                self.handleBufferLocked(buffer)
+            }
         }
 
-        // 选择指定输入设备
-        if let deviceID = inputDeviceID, deviceID != 0 {
-            setInputDevice(deviceID)
-        }
-
-        engine.prepare()
+        let deviceID = inputDeviceID ?? 0
         do {
-            try engine.start()
-            isRunning = true
-            logger.info("Audio recorder started (sampleRate=\(inputFormat.sampleRate), channels=\(inputFormat.channelCount))")
+            try input.start(deviceID: deviceID)
+            isRunning = input.isRunning
+            logger.info("Audio recorder started (device=\(deviceID))")
         } catch {
-            highPass.removeTap(onBus: 0)
             throw AudioError.engineStartFailed(error.localizedDescription)
+        }
+    }
+
+    /// 缓冲第一个 buffer 的格式来确定 m4a 写入参数（HALAudioInput 在 start 后才有 format）。
+    private var pendingOutputURL: URL?
+
+    /// 处理每个采集 buffer（必须在 stateQueue 上调用）。
+    /// 建文件（首次）→ 降噪 → 写文件 + 电平。
+    private func handleBufferLocked(_ buffer: AVAudioPCMBuffer) {
+        // 首个 buffer：用实际格式创建输出文件
+        if outputFile == nil, let url = pendingOutputURL {
+            let outputSettings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: buffer.format.sampleRate,
+                AVNumberOfChannelsKey: buffer.format.channelCount,
+                AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+            ]
+            do {
+                outputFile = try AVAudioFile(forWriting: url, settings: outputSettings)
+                pendingOutputURL = nil
+            } catch {
+                logger.error("Could not create output file: \(error.localizedDescription)")
+                return
+            }
+        }
+
+        applySoftNoiseGate(to: buffer)
+        let level = AudioMeterCalculator.audioLevel(from: buffer)
+        let handler = onLevel
+        if let file = outputFile {
+            try? file.write(from: buffer)
+        }
+        // 电平回调在队列外触发，避免阻塞串行队列
+        if let handler {
+            DispatchQueue.main.async { handler(level) }
         }
     }
 
     /// 停止录音并释放资源。
     func stop() {
         guard isRunning else { return }
-        highPass.removeTap(onBus: 0)
-        engine.stop()
-        engine.reset()
+        // 先同步停止采集，确保不再有新 buffer 回调
+        input.stop()
+        // 同步屏障：等串行队列上所有在途的 handleBuffer 执行完，再清空状态
+        stateQueue.sync {
+            onLevel = nil
+            outputFile = nil
+            pendingOutputURL = nil
+        }
         isRunning = false
-        onBuffer = nil
-        onLevel = nil
         logger.info("Audio recorder stopped")
     }
 
     var isRecording: Bool { isRunning }
 
     // MARK: - Processing Chain
-
-    private func configureProcessingChain() {
-        guard let band = highPass.bands.first else { return }
-        band.filterType = .highPass
-        band.frequency = 85  // 滤除低频环境噪声
-        band.bypass = false
-    }
 
     /// 软噪声门：参照 PowerMeetings applySoftNoiseGate。
     /// - magnitude < noiseFloor (0.012): 衰减到 18%
@@ -131,21 +145,6 @@ final class AudioRecorder {
                 }
             }
         }
-    }
-
-    // MARK: - Device Selection
-
-    /// 设置 AVAudioEngine 的输入设备。
-    /// 注意：AVAudioEngine 默认用系统当前 input device。要指定设备需通过 CoreAudio 设置
-    /// AudioDeviceID 到 inputNode 的底层 AudioUnit 的 kAudioOutputUnitProperty_CurrentDevice 属性。
-    /// 通过 AUGraph / AudioComponentDescription 获取 AU。
-    private func setInputDevice(_ deviceID: AudioDeviceID) {
-        // AVAudioInputNode 没有公开的 audioUnit 访问器；通过 AudioUnit 的 property 访问。
-        // 取出 inputNode 的底层 AudioUnit（通过 AUGraph 或 kAudioUnitProperty_CurrentDevice）。
-        // 这里使用与 PowerMeetings AudioDeviceManager 一致的做法：依赖系统默认设备，
-        // 由用户在系统设置里选择输入源；App 内的设备选择通过设置系统默认设备实现。
-        // （完整实现见设备选择增强阶段）
-        logger.warning("Custom device selection requires system default device change; using current default (device \(deviceID) requested)")
     }
 }
 

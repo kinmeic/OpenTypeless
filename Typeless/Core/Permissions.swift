@@ -52,20 +52,7 @@ final class Permissions: ObservableObject {
     // MARK: - Checkers
 
     private func checkInputMonitoring() -> Bool {
-        // CGEvent.tapCreate returns nil when not authorized.
-        // We do a lightweight check: try creating a tap and immediately destroy it.
-        let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .listenOnly,
-            eventsOfInterest: CGEventMask(1 << CGEventType.keyDown.rawValue),
-            callback: { _, _, event, _ in Unmanaged.passUnretained(event) },
-            userInfo: nil
-        )
-        if tap != nil {
-            CGEvent.tapEnable(tap: tap!, enable: false)
-        }
-        return tap != nil
+        CGPreflightListenEventAccess()
     }
 
     private func checkMicrophone() -> Bool {
@@ -77,6 +64,23 @@ final class Permissions: ObservableObject {
     }
 
     // MARK: - Requesters
+
+    func requestAccessibility() {
+        let options = [
+            kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true
+        ] as CFDictionary
+        accessibilityGranted = AXIsProcessTrustedWithOptions(options)
+        if !accessibilityGranted {
+            openAccessibilitySettings()
+        }
+    }
+
+    func requestInputMonitoring() {
+        inputMonitoringGranted = CGRequestListenEventAccess()
+        if !inputMonitoringGranted {
+            openInputMonitoringSettings()
+        }
+    }
 
     func requestMicrophone() {
         AVAudioApplication.requestRecordPermission { [weak self] granted in

@@ -15,14 +15,10 @@ struct TypelessApp: App {
                 .environmentObject(permissions)
                 .environmentObject(pipeline)
         } label: {
-            if let statusImage = NSImage(named: "StatusIcon") {
-                Image(nsImage: statusImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-            } else {
-                Image(systemName: pipeline.phase.iconName)
-                    .renderingMode(.template)
-            }
+            Image(systemName: pipeline.phase.iconName)
+                .renderingMode(.template)
+                .imageScale(.medium)
+                .foregroundColor(pipeline.phase.iconColor)
         }
         .menuBarExtraStyle(.menu)
 
@@ -40,9 +36,17 @@ struct TypelessApp: App {
 extension Pipeline.Phase {
     var iconName: String {
         switch self {
-        case .idle:       return "mic.fill"
-        case .recording:  return "mic.circle.fill"
-        case .processing: return "gearshape.fill"
+        case .idle:       return "waveform"          // 静态波形：待命
+        case .recording:  return "waveform"          // 红色波形：录音中
+        case .processing: return "waveform.circle"   // 圆框波形：处理中
+        }
+    }
+
+    var iconColor: Color {
+        switch self {
+        case .idle:       return .secondary      // 灰：待命
+        case .recording:  return .red            // 红：录音中
+        case .processing: return .blue           // 蓝：处理中
         }
     }
 }

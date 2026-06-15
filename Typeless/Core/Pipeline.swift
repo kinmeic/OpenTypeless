@@ -1,4 +1,6 @@
 import Foundation
+import CoreAudio
+import AppKit
 import os.log
 
 private let logger = Logger(subsystem: "com.typeless.app", category: "pipeline")
@@ -12,6 +14,8 @@ private let logger = Logger(subsystem: "com.typeless.app", category: "pipeline")
 ///   A = Dictate (speech → text → inject)
 ///   B = Translate (speech → text → LLM translate → inject)
 ///   C = Assist (speech → text + context → LLM multimodal → inject)
+///
+/// ASR 采用非实时（batch）模式：录完整段音频落盘后，PROCESSING 阶段一次性转写。
 @MainActor
 final class Pipeline: ObservableObject {
     enum Phase: Equatable {
@@ -43,11 +47,17 @@ final class Pipeline: ObservableObject {
     private let context = ContextCollector()
     private let llm = LLMClient()
     private let settings = AppSettings.shared
+    private let audioMuter = SystemAudioMuter()
+    private let soundFeedback = SoundFeedback()
 
-    private var currentASR: ASREngine?
     private var recordingTask: Task<Void, Never>?
     private var silenceTimer: Timer?
     private var lastVoiceTime: Date?
+
+    /// 非实时模式下的临时录音文件 URL，转写完后删除。
+    private var recordingFileURL: URL?
+
+    private var terminateObserver: NSObjectProtocol?
 
     init() {
         monitor.update(settings.shortcuts)
@@ -56,12 +66,22 @@ final class Pipeline: ObservableObject {
             let action = self.action(from: event)
             self.handleShortcut(action: action)
         }
+        // 监听应用退出，确保静音/录音资源被恢复和释放
+        terminateObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.stop()
+        }
     }
 
     deinit {
-        // Deinit is nonisolated; we cannot call @MainActor-isolated methods.
-        // The monitor's event tap will be cleaned up by the OS when the process exits.
-        // For explicit cleanup, use Pipeline.stop() before releasing the reference.
+        if let terminateObserver {
+            NotificationCenter.default.removeObserver(terminateObserver)
+        }
+        // Deinit is nonisolated; we cannot call @MainActor-isolated methods。
+        // 关键资源（静音恢复）已由 stop() / willTerminate 处理。
     }
 
     // MARK: - Public
@@ -82,6 +102,12 @@ final class Pipeline: ObservableObject {
     func stop() {
         monitor.stop()
         recorder.stop()
+        // 确保静音被恢复（退出/释放时若仍在录音状态）
+        audioMuter.restore()
+        silenceTimer?.invalidate()
+        silenceTimer = nil
+        cleanupRecordingFile()
+        RecordingOverlay.shared.hide()
     }
 
     func clearError() {
@@ -96,17 +122,21 @@ final class Pipeline: ObservableObject {
         lastError = nil
         lastTranscript = nil
 
-        do {
-            // 根据配置创建 ASR 引擎
-            currentASR = makeASREngine()
-            try currentASR?.start()
+        // 交互声音：开始
+        if settings.playInteractionSound { soundFeedback.playStart() }
+        // 静音系统输出
+        if settings.muteSystemAudioDuringRecording { audioMuter.mute() }
 
-            // 开始录音，buffer 喂给 ASR
+        do {
+            // 非实时模式：录音落盘 m4a
+            recordingFileURL = makeRecordingFileURL()
+
+            // 解析配置的输入设备 ID（空串或无法解析时用系统默认）
+            let deviceID = AudioDeviceID(settings.audioInputDeviceID) ?? 0
+
             try recorder.start(
-                inputDeviceID: nil,
-                onBuffer: { [weak self] buffer in
-                    self?.currentASR?.feed(buffer)
-                },
+                inputDeviceID: deviceID,
+                recordToFile: recordingFileURL!,
                 onLevel: { [weak self] level in
                     Task { @MainActor in
                         self?.handleAudioLevel(level)
@@ -116,11 +146,15 @@ final class Pipeline: ObservableObject {
 
             phase = .recording
             startSilenceDetection()
+            // 显示录音浮层
+            RecordingOverlay.shared.show(pipeline: self)
         } catch {
             logger.error("Failed to start recording: \(error.localizedDescription)")
             lastError = error.localizedDescription
             phase = .idle
-            currentASR = nil
+            cleanupRecordingFile()
+            // 启动失败也要恢复静音
+            audioMuter.restore()
         }
     }
 
@@ -134,12 +168,25 @@ final class Pipeline: ObservableObject {
         recorder.stop()
         inputLevel = 0
 
+        // 隐藏录音浮层
+        RecordingOverlay.shared.hide()
+
+        // 恢复系统输出 + 交互声音：停止
+        audioMuter.restore()
+        if settings.playInteractionSound { soundFeedback.playEnd() }
+
         phase = .processing(action: action)
 
         do {
-            // 获取转写结果
-            let text = try await currentASR?.finalize() ?? ""
-            currentASR = nil
+            // 非实时转写：创建引擎，调 transcribeFile
+            let asr = makeASREngine()
+            let text: String
+            if let url = recordingFileURL {
+                text = try await asr.transcribeFile(url)
+            } else {
+                throw NSError(domain: "Typeless", code: 1,
+                              userInfo: [NSLocalizedDescriptionKey: "No recording file to transcribe."])
+            }
             lastTranscript = text
             logger.info("Transcript: \(text)")
 
@@ -155,34 +202,34 @@ final class Pipeline: ObservableObject {
                 await injector.insert(translated)
 
             case .assist:
-                // C：采集上下文 + LLM 处理后注入
+                // C：采集上下文 + LLM 处理，结果以弹窗显示（不注入文本框）
                 let ctx = await context.collect()
                 let answer = try await assist(transcription: text, context: ctx)
-                await injector.insert(answer)
+                ResultOverlay.shared.show(answer: answer)
             }
         } catch {
             logger.error("Processing failed: \(error.localizedDescription)")
             lastError = error.localizedDescription
         }
 
+        cleanupRecordingFile()
         phase = .idle
     }
 
-    // MARK: - ASR Engine Factory
+    // MARK: - Recording File Helpers
 
-    private func makeASREngine() -> ASREngine {
-        switch settings.asr.engine {
-        case .remote:
-            if settings.asr.remoteConfigured {
-                return RemoteASR(config: settings.asr)
-            } else {
-                // 远程 ASR 未配置，降级到系统 STT
-                logger.warning("Remote ASR not configured, falling back to system speech")
-                return SystemSpeechASR(config: settings.asr)
-            }
-        case .systemSpeech:
-            return SystemSpeechASR(config: settings.asr)
+    /// 生成临时录音文件 URL（m4a）。
+    private func makeRecordingFileURL() -> URL {
+        let dir = FileManager.default.temporaryDirectory
+        return dir.appendingPathComponent("typeless-\(UUID().uuidString).m4a")
+    }
+
+    /// 删除临时录音文件并清空引用。
+    private func cleanupRecordingFile() {
+        if let url = recordingFileURL {
+            try? FileManager.default.removeItem(at: url)
         }
+        recordingFileURL = nil
     }
 
     // MARK: - Silence Detection (auto-stop after 2s of silence)
@@ -206,6 +253,29 @@ final class Pipeline: ObservableObject {
         // 电平高于阈值视为有语音
         if level > 0.08 {
             lastVoiceTime = Date()
+        }
+    }
+
+    // MARK: - ASR Engine Factory
+
+    private func makeASREngine() -> ASREngine {
+        switch settings.asr.engine {
+        case .llm:
+            // ASR Model：用 LLM 配置（智谱 GLM-ASR 等）
+            let asrConfigured: Bool
+            if settings.llm.asrProviderSameAsText || settings.llm.asrProvider == "same" {
+                asrConfigured = !settings.llm.textApiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            } else {
+                asrConfigured = !settings.llm.asrApiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+            if asrConfigured {
+                return LLMASR(config: settings.llm)
+            } else {
+                logger.warning("ASR Model not configured, falling back to system speech")
+                return SystemSpeechASR(config: settings.asr)
+            }
+        case .systemSpeech:
+            return SystemSpeechASR(config: settings.asr)
         }
     }
 

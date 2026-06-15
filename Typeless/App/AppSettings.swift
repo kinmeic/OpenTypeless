@@ -11,10 +11,21 @@ struct LLMConfig: Codable, Equatable {
     var textModel: String = "gpt-4o-mini"
     var textBaseUrl: String = "https://api.openai.com"
 
-    var visionProvider: String = "openai"
+    var visionProvider: String = "same"
     var visionApiKey: String = ""
     var visionModel: String = "gpt-4o"
     var visionBaseUrl: String = "https://api.openai.com"
+
+    /// 当 true 时，Vision Model 复用 Text Model 的 provider / apiKey / baseUrl，只单独设 model。
+    var visionProviderSameAsText: Bool = true
+
+    var asrProvider: String = "same"
+    var asrApiKey: String = ""
+    var asrModel: String = "gpt-4o-mini"
+    var asrBaseUrl: String = "https://api.openai.com"
+
+    /// 当 true 时，ASR Model 复用 Text Model 的 provider / apiKey / baseUrl，只单独设 model。
+    var asrProviderSameAsText: Bool = true
 }
 
 // ASRConfig is defined in Core/ASREngine.swift (the canonical version).
@@ -54,7 +65,17 @@ final class AppSettings: ObservableObject {
     }
 
     @Published var audioInputDeviceID: String {
-        didSet { save(key: "audioInputDeviceID", value: audioInputDeviceID) }
+        didSet { UserDefaults.standard.set(audioInputDeviceID, forKey: "audioInputDeviceID") }
+    }
+
+    /// 录音时静音系统输出（避免扬声器声音被麦克风采到）。
+    @Published var muteSystemAudioDuringRecording: Bool {
+        didSet { UserDefaults.standard.set(muteSystemAudioDuringRecording, forKey: "muteSystemAudioDuringRecording") }
+    }
+
+    /// 交互声音（开始/停止录音时各播一声）。
+    @Published var playInteractionSound: Bool {
+        didSet { UserDefaults.standard.set(playInteractionSound, forKey: "playInteractionSound") }
     }
 
     // MARK: - Init
@@ -65,6 +86,9 @@ final class AppSettings: ObservableObject {
         self.shortcuts = Self.load(key: "shortcuts") ?? ShortcutsConfig()
         self.targetLanguage = UserDefaults.standard.string(forKey: "targetLanguage") ?? "English"
         self.audioInputDeviceID = UserDefaults.standard.string(forKey: "audioInputDeviceID") ?? ""
+        // 注意：上面 audioInputDeviceID 的 didSet 不会触发（init 直接赋值），这里手动存一次以保证键名一致
+        self.muteSystemAudioDuringRecording = UserDefaults.standard.object(forKey: "muteSystemAudioDuringRecording") as? Bool ?? false
+        self.playInteractionSound = UserDefaults.standard.object(forKey: "playInteractionSound") as? Bool ?? true
         logger.info("Settings loaded")
     }
 

@@ -1,6 +1,8 @@
 # Typeless（Swift 原生版）技术设计
 
-> 基于 PTerminal 的 AI 配置抽象、CD-Switch 的菜单栏骨架、Typeless 设计文档的领域逻辑（KeyboardHelper / InputHelper 的状态机与注入降级链）、**PowerMeetings 的 ASR 实战经验**（系统 Speech 多语言并行 + 阿里 Paraformer WebSocket 流式 + 音频降噪与格式转换），用 **纯 Swift + SwiftUI** 重新落地。
+> 基于 PTerminal 的 AI 配置抽象、CD-Switch 的菜单栏骨架、Typeless 设计文档的领域逻辑（KeyboardHelper / InputHelper 的状态机与注入降级链）、**PowerMeetings 的 ASR 实战经验**（系统 Speech 多语言并行 + 阿里 Paraformer WebSocket + 音频降噪与格式转换），用 **纯 Swift + SwiftUI** 重新落地。
+>
+> ⚠️ **ASR 模式说明（与 PowerMeetings 的关键差异）**：PowerMeetings 走实时流式转写；**本项目默认非实时（batch）转写**——录完整段再一次性识别，准确率与标点更好，代价是用户停下后多等 1~3s。流式（边录边认）作为设置项可选保留，用户可在设置里切回。两个引擎（系统 Speech / 阿里 Paraformer）都同时支持这两种模式。
 
 ---
 
@@ -11,7 +13,7 @@
 | 需求 | 对应模块 |
 |---|---|
 | 1. 配置文字模型 + 多模态模型 | `LLMClient` + 设置面板 |
-| 2. 语音转文字（系统 STT 或大模型 ASR） | `AudioRecorder` + `ASREngine` |
+| 2. 语音转文字（默认非实时 batch，可选流式；系统 STT 或大模型 ASR） | `AudioRecorder` + `ASREngine` |
 | 3. 全局组合键 A/B/C 触发录音/转写/翻译/LLM 处理并注入 | `KeyboardMonitor` + `Pipeline` + `TextInjector` |
 | 4. 菜单栏图标：设置 / 选择音频输入源 / 退出 | `MenuBarExtra`（参照 CD-Switch） |
 
@@ -354,19 +356,40 @@ enum AudioMeterCalculator {
 - **高通滤波**（85Hz）：滤除空调、风扇等低频环境噪声。
 - **软噪声门**：不是硬切，而是三段式（大幅衰减 → 线性过渡 → 全通），避免语音开头被截断。
 - **音频电平检测**：RMS 计算 → 归一化到 0~1，用于菜单栏图标动画或录音状态提示。
-- **不需要写文件**：Typeless 是"说完即注入"的短语音场景（几秒到几十秒），buffer 直接喂 ASR，无需落盘。PowerMeetings 需要落盘是因为要保存会议录音。
+- **写文件（非实时模式）/ 不写文件（流式模式）**：
+  - **非实时（默认）**：`start(recordToFile: url)` 把录音写入 m4a 临时文件，停止后整段交给 ASR。m4a 用 `AVAudioFormat` + `kAudioFormatMPEG4AAC`，系统 Speech URL 识别和阿里 Paraformer 都能吃。
+  - **流式（可选）**：不传 `recordToFile`，buffer 直接喂 ASR，不落盘。
 
-### 4.4 ASREngine（系统 Speech vs 大模型，双引擎架构）⚠️ 参照 PowerMeetings
+> 注：tap 回调里"先写文件，再喂 ASR"，两种模式共用同一个 tap。
 
-PowerMeetings 的 ASR 架构非常成熟：**系统 STT 作为默认路径，大模型 ASR 作为可选项，两者自动降级**。Typeless 直接移植这个双引擎模式。
+### 4.4 ASREngine（系统 Speech vs 大模型，双引擎 + 双模式架构）⚠️ 参照 PowerMeetings
 
-#### 4.4.1 系统 STT（`LiveSpeechTranscriber`）— 默认路径
+PowerMeetings 的 ASR 架构非常成熟：**系统 STT 作为默认路径，大模型 ASR 作为可选项，两者自动降级**。Typeless 在此基础上**增加"非实时 vs 流式"维度**：每个引擎都同时支持 batch（默认）和 streaming（可选）两种调用路径。
+
+`ASREngine` 协议统一两种形态：
+
+```swift
+protocol ASREngine: AnyObject {
+    func start() throws                              // 流式：开始会话
+    func feed(_ buffer: AVAudioPCMBuffer)            // 流式：边录边喂
+    func finalize() async throws -> String           // 流式：停止并取结果
+    func transcribeFile(_ url: URL) async throws -> String  // 非实时：整段文件一次性识别
+    var isRunning: Bool { get }
+}
+```
+
+Pipeline 根据 `ASRConfig.streaming` 选路径：默认调 `transcribeFile(_:)`，流式模式走 `start/feed/finalize`。
+
+#### 4.4.1 系统 STT（`SystemSpeechASR`）— 默认引擎
+
+支持两种模式：
+- **非实时 `transcribeFile(_:)`**（默认）：用 `SFSpeechURLRecognitionRequest(url:)`，对每个配置语言各跑一次，取最长结果。准确率优先于速度，串行跑。
+- **流式 `start/feed/finalize`**（可选）：参照 PowerMeetings `LiveSpeechTranscriber`，多语言并行、on-device、自动标点、静音检测。
 
 ```swift
 import Speech
 
-/// 系统 Speech 实时转写。
-/// 参照 PowerMeetings LiveSpeechTranscriber：多语言并行、on-device、静音检测、自动标点。
+/// 系统 Speech 引擎，支持 batch（默认）和 streaming 两种模式。
 final class SystemSpeechASR: ASREngine {
     private let queue = DispatchQueue(label: "Typeless.SystemSpeechASR")
     private var audioEngine: AVAudioEngine?
@@ -470,12 +493,15 @@ final class SystemSpeechASR: ASREngine {
 - **静音检测**：音频电平 < 0.075 持续 1.5s 视为静音，可用于自动断句或提示用户"已停止说话"。
 - **非主动停止的错误静默处理**：`isStoppingIntentionally` 标志区分"用户主动停止"和"recognizer 异常退出"，后者不弹错误，由其他并行 recognizer 或降级路径兜底。
 
-#### 4.4.2 大模型 ASR（`RemoteASR`）— 可选项
+#### 4.4.2 大模型 ASR（`RemoteASR`）— 可选项（阿里 Paraformer）
 
-参照 PowerMeetings `AliyunParaformerTranscriber` 的 WebSocket 流式架构，通用化为任意支持流式音频上传的 ASR 端点（阿里、火山、OpenAI Whisper 等）。
+参照 PowerMeetings `AliyunParaformerTranscriber` 的 WebSocket 流式架构。**默认对接阿里 Paraformer**，两种模式：
+
+- **非实时 `transcribeFile(_:)`**（默认）：读取 m4a 文件 → `AVAudioFile` + `AVAudioConverter` 解码为 Int16 PCM 切片（每片 ~256ms@16k）→ 复用流式 WS 双工协议（`run-task` → 逐片 feed → `finish-task`），相当于把"实时来 buffer"换成"文件切片回放"。**不另写 HTTP 文件上传客户端**，省一层协议。
+- **流式 `start/feed/finalize`**（可选）：实时麦克风 buffer 直接走 WS。
 
 ```swift
-/// 大模型实时 ASR（WebSocket 流式）。
+/// 阿里 Paraformer ASR（WebSocket 双工），支持 batch 和 streaming 两种模式。
 /// 参照 PowerMeetings AliyunParaformerTranscriber：音频格式转换 + WebSocket 双工 + 自动降级。
 final class RemoteASR: ASREngine {
     private let queue = DispatchQueue(label: "Typeless.RemoteASR")
@@ -597,16 +623,21 @@ final class RemoteASR: ASREngine {
 ```swift
 enum ASREngineType: String, Codable, CaseIterable {
     case systemSpeech = "system"      // 默认：SFSpeechRecognizer，本地、免费
-    case remote = "remote"            // 可选项：阿里/火山/Whisper 等 WebSocket 流式
+    case remote = "remote"            // 可选项：阿里 Paraformer WebSocket
 }
 
 struct ASRConfig: Codable, Equatable {
     var engine: ASREngineType = .systemSpeech
+
+    /// 转写模式：false=非实时（默认，录完整段后一次性转写，更准）；
+    /// true=流式（边录边认，延迟更低）。
+    var streaming: Bool = false
+
     var languageIDs: [String] = ["zh-CN", "en-US"]  // 系统 STT 多语言并行
-    
+
     // 远程 ASR 配置（仅 engine == .remote 时有效）
-    var remoteProvider: String = "aliyun"  // aliyun | volcengine | whisper
-    var remoteEndpoint: String = ""
+    var remoteProvider: String = "aliyun"
+    var remoteEndpoint: String = "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
     var remoteApiKey: String = ""
     var remoteModel: String = "fun-asr-realtime"
     var remoteSampleRate: Int = 16_000
@@ -615,14 +646,17 @@ struct ASRConfig: Codable, Equatable {
 
 | 方案 | 优点 | 缺点 | 建议默认 |
 |---|---|---|---|
-| 系统 Speech | 免费、本地(on-device)、低延迟(~200ms)、隐私安全 | 中文准确率随系统版本；每设备有日配额；语言覆盖有限 | ✅ **默认** |
-| 远程 ASR | 准确率高、多语言强、标点好、支持方言 | 联网+付费+1~3s延迟、需配置API key | 可选项 |
+| 系统 Speech | 免费、本地(on-device)、隐私安全 | 中文准确率随系统版本；每设备有日配额；语言覆盖有限；URL 识别单任务 ~1min | ✅ **默认引擎** |
+| 远程 ASR | 准确率高、多语言强、标点好、支持方言 | 联网+付费、需配置 API key | 可选引擎 |
+| **非实时（batch）** | 整段上下文、标点更准、协议简单 | 用户停下后多等 1~3s | ✅ **默认模式** |
+| **流式（streaming）** | 用户停下时文字基本就绪，延迟低 | 短句场景准确率略低、协议复杂（WS 双工） | 可选模式 |
 
 **选择策略**：
-1. 默认用系统 Speech，开箱即用。
-2. 用户可在设置里切换远程 ASR，配置 endpoint + apiKey + model。
-3. 远程 ASR 连接失败 / 未配置 → **自动降级到系统 Speech**（PowerMeetings 模式）。
-4. 系统 Speech 未授权 / 不可用 → 提示用户去设置里授权或切换远程 ASR。
+1. 默认用系统 Speech + 非实时模式，开箱即用。
+2. 用户可在设置里切换远程 ASR（阿里 Paraformer），配置 endpoint + apiKey + model。
+3. 用户可在设置里开关流式模式（`streaming`）。
+4. 远程 ASR 连接失败 / 未配置 → **自动降级到系统 Speech**（PowerMeetings 模式）。
+5. 系统 Speech 未授权 / 不可用 → 提示用户去设置里授权或切换远程 ASR。
 
 ### 4.5 TextInjector（注入降级链）⚠️ 核心难点
 
@@ -714,13 +748,27 @@ final class ContextCollector {
 
 ### 4.7 Pipeline 编排（把上面串起来）
 
+按 `ASRConfig.streaming` 分两条路径：默认非实时（录完落盘 → `transcribeFile`），可选流式（边录边喂 → `finalize`）。
+
 ```swift
 @MainActor
 extension Pipeline {
     private func startRecording() async {
         do {
-            try recorder.start(inputDevice: settings.audioInputDevice) { [weak asr] buf in
-                asr?.feed(buf)   // 系统STT流式喂 buffer
+            if settings.asr.streaming {
+                // 流式：建引擎，边录边喂 buffer
+                asr = makeASREngine()
+                try asr?.start()
+                try recorder.start(inputDevice: settings.audioInputDevice,
+                                   recordToFile: nil) { [weak asr] buf in
+                    asr?.feed(buf)
+                }
+            } else {
+                // 非实时（默认）：录音落盘 m4a，不建引擎
+                recordingFileURL = makeRecordingFileURL()
+                try recorder.start(inputDevice: settings.audioInputDevice,
+                                   recordToFile: recordingFileURL,
+                                   onBuffer: nil)
             }
             phase = .recording
         } catch { lastError = error.localizedDescription; phase = .idle }
@@ -730,7 +778,14 @@ extension Pipeline {
         phase = .processing(action: action)
         recorder.stop()
         do {
-            let text = try await asr.finalize()      // 拿转写结果
+            // 取转写结果：流式 finalize()，非实时 transcribeFile(_:)
+            let text: String
+            if settings.asr.streaming {
+                text = try await asr?.finalize() ?? ""
+            } else {
+                let asr = makeASREngine()
+                text = try await asr.transcribeFile(recordingFileURL!)
+            }
             switch action {
             case .dictate:
                 await injector.insert(text)
@@ -743,6 +798,7 @@ extension Pipeline {
                 await injector.insert(answer)
             }
         } catch { lastError = error.localizedDescription }
+        cleanupRecordingFile()   // 删临时录音文件
         phase = .idle
     }
 }

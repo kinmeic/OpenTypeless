@@ -4,35 +4,21 @@ import Speech
 
 // MARK: - ASR Protocol
 
-/// 语音转文字引擎协议。
-/// 两种实现：SystemSpeechASR（系统内置）、RemoteASR（大模型 WebSocket 流式）。
+/// 语音转文字引擎协议（非实时 batch 模式）。
+/// 两种实现：SystemSpeechASR（系统内置）、LLMASR（LLM 音频转写 API，如智谱 GLM-ASR）。
+/// 调用方式统一为：录完整段音频落盘后，调 `transcribeFile(_:)` 一次性转写。
 protocol ASREngine: AnyObject {
-    /// 开始一次识别会话。
-    func start() throws
-
-    /// 喂入音频 buffer（流式）。
-    func feed(_ buffer: AVAudioPCMBuffer)
-
-    /// 停止并返回最终转写结果。
-    func finalize() async throws -> String
-
-    /// 是否正在识别。
-    var isRunning: Bool { get }
-}
-
-// MARK: - ASR Result
-
-struct ASRResult {
-    let text: String
-    let languageID: String?
-    let isFinal: Bool
+    /// 对整段已落盘的音频文件做一次性识别。
+    /// - Parameter url: 录音文件 URL（m4a/wav 等）。
+    /// - Returns: 整段转写文字。
+    func transcribeFile(_ url: URL) async throws -> String
 }
 
 // MARK: - ASR Config
 
 enum ASREngineType: String, Codable, CaseIterable {
     case systemSpeech = "system"
-    case remote = "remote"
+    case llm = "llm"
 }
 
 struct ASRConfig: Codable, Equatable {
@@ -41,20 +27,8 @@ struct ASRConfig: Codable, Equatable {
     /// 系统 STT 多语言并行识别的语言列表。
     var languageIDs: [String] = ["zh-CN", "en-US"]
 
-    // 远程 ASR 配置（仅 engine == .remote 时有效）
-    var remoteProvider: String = "aliyun"
-    var remoteEndpoint: String = "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
-    var remoteApiKey: String = ""
-    var remoteModel: String = "fun-asr-realtime"
-    var remoteSampleRate: Int = 16_000
-
     /// 系统 STT 是否可用（权限 + recognizer 存在）。
     var systemSpeechAvailable: Bool {
         SFSpeechRecognizer.authorizationStatus() == .authorized
-    }
-
-    /// 远程 ASR 是否已配置。
-    var remoteConfigured: Bool {
-        !remoteApiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }
