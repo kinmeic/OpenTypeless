@@ -1,0 +1,35 @@
+name: Typeless
+targets:
+  Typeless:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - Typeless
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.typeless.app
+        INFOPLIST_FILE: Typeless/SupportingFiles/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Typeless/SupportingFiles/Typeless.entitlements
+        SWIFT_VERSION: "5.9"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    entitlements:
+      path: Typeless/SupportingFiles/Typeless.entitlements
+    info:
+      path: Typeless/SupportingFiles/Info.plist
+      properties:
+        LSUIElement: true
+        NSMicrophoneUsageDescription: "Typeless needs microphone access to record your voice for speech-to-text."
+        NSSpeechRecognitionUsageDescription: "Typeless needs speech recognition access to convert your voice into text."
+        NSUserNotificationAlertStyle: alert
+    testTargets:
+      - TypelessTests
+
+  TypelessTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - TypelessTests
+    dependencies:
+      - target: Typeless
