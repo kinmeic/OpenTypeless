@@ -1,5 +1,5 @@
 import XCTest
-@testable import Typeless
+@testable import OpenTypeless
 
 final class ShortcutDetectorTests: XCTestCase {
 

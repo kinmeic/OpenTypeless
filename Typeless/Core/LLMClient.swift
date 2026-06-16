@@ -336,11 +336,12 @@ final class LLMClient {
         let baseUrl: String
 
         if useASRConfig {
-            let useText = config.asrProviderSameAsText
+            let useText = config.asrProviderSameAsText || config.asrProvider == "same"
             providerRaw = useText ? config.textProvider : config.asrProvider
             apiKey = useText ? config.textApiKey : config.asrApiKey
             model = config.asrModel
             baseUrl = useText ? config.textBaseUrl : config.asrBaseUrl
+            return validateASRSettings(providerRaw: providerRaw, apiKey: apiKey, model: model, baseUrl: baseUrl)
         } else {
             providerRaw = config.textProvider
             apiKey = config.textApiKey
@@ -365,6 +366,52 @@ final class LLMClient {
         } catch {
             return TestResult(ok: false, message: error.localizedDescription)
         }
+    }
+
+    private func validateASRSettings(providerRaw: String, apiKey: String, model: String, baseUrl: String) -> TestResult {
+        let provider = providerRaw.lowercased()
+        let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseUrl = baseUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        let apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard apiKey.isEmpty == false else {
+            return TestResult(ok: false, message: "ASR Model is not configured. Set an API key.")
+        }
+        guard model.isEmpty == false else {
+            return TestResult(ok: false, message: "ASR Model is not configured. Set a model name.")
+        }
+        guard let url = URL(string: baseUrl), url.scheme != nil, url.host != nil else {
+            return TestResult(ok: false, message: "ASR Base URL is invalid.")
+        }
+
+        let lowerBaseURL = baseUrl.lowercased()
+        let isAliyunBaseURL = lowerBaseURL.contains("aliyuncs.com/compatible-mode")
+            || lowerBaseURL.hasSuffix("/chat/completions")
+        let isQwenASRModel = model.lowercased().contains("qwen3-asr-flash")
+
+        if provider == "aliyun" || provider == "dashscope" {
+            guard isAliyunBaseURL else {
+                return TestResult(ok: false, message: "Aliyun Qwen-ASR requires an Aliyun compatible-mode Base URL.")
+            }
+            guard isQwenASRModel else {
+                return TestResult(ok: false, message: "Aliyun Qwen-ASR currently supports qwen3-asr-flash.")
+            }
+            return TestResult(ok: true, message: "ASR settings valid for Aliyun Qwen-ASR.")
+        }
+        if isAliyunBaseURL {
+            guard isQwenASRModel else {
+                return TestResult(ok: false, message: "Aliyun Qwen-ASR currently supports qwen3-asr-flash.")
+            }
+            return TestResult(ok: true, message: "ASR settings valid for Aliyun Qwen-ASR.")
+        }
+        if provider == "openai" {
+            if isQwenASRModel {
+                return TestResult(ok: false, message: "qwen3-asr-flash requires Aliyun compatible-mode Base URL.")
+            }
+            return TestResult(ok: true, message: "ASR settings valid for OpenAI-compatible transcription.")
+        }
+
+        return TestResult(ok: false, message: "ASR Model supports OpenAI-compatible transcription APIs and Aliyun Qwen-ASR.")
     }
 
     struct TestResult {

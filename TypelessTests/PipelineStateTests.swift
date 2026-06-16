@@ -1,12 +1,12 @@
 import XCTest
-@testable import Typeless
+@testable import OpenTypeless
 
 final class PipelineStateTests: XCTestCase {
 
     func testPhaseIconName() {
-        XCTAssertEqual(Pipeline.Phase.idle.iconName, "mic.fill")
-        XCTAssertEqual(Pipeline.Phase.recording.iconName, "mic.circle.fill")
-        XCTAssertEqual(Pipeline.Phase.processing(action: .dictate).iconName, "gearshape.fill")
+        XCTAssertEqual(Pipeline.Phase.idle.iconName, "waveform")
+        XCTAssertEqual(Pipeline.Phase.recording.iconName, "waveform")
+        XCTAssertEqual(Pipeline.Phase.processing(action: .dictate).iconName, "waveform.circle")
     }
 
     func testActionRawValues() {

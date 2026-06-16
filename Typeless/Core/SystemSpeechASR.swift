@@ -129,8 +129,9 @@ final class SystemSpeechASR: ASREngine {
             self.previousRecognitionTask = task
 
             // 兜底：如果 recognizer 因系统限制（如 ~1 分钟单任务上限）迟迟不回调，
-            // 30 秒后强制 resume，防止 Task 永久挂起。
-            DispatchQueue.global().asyncAfter(deadline: .now() + 30) { [weak self] in
+            // 75 秒后强制取消并 resume，防止 Task 永久挂起，同时给系统 URL 识别约 1 分钟的任务上限留余量。
+            DispatchQueue.global().asyncAfter(deadline: .now() + 75) { [weak self] in
+                self?.previousRecognitionTask?.cancel()
                 resumeOnce("")
                 self?.previousRecognitionTask = nil
             }

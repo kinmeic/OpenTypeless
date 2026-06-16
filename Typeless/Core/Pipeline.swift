@@ -1,6 +1,7 @@
 import Foundation
 import CoreAudio
 import AppKit
+import Combine
 import os.log
 
 private let logger = Logger(subsystem: "com.opentypeless.app", category: "pipeline")
@@ -58,11 +59,21 @@ final class Pipeline: ObservableObject {
 
     /// 非实时模式下的临时录音文件 URL，转写完后删除。
     private var recordingFileURL: URL?
+    /// 开始录音时的焦点上下文快照；Assist 停止处理时复用它，避免 ASR 耗时期间选区丢失。
+    private var recordingStartContext: ContextCollector.CollectedContext?
+    private var recordingStartTime: Date?
 
     private var terminateObserver: NSObjectProtocol?
+    private var cancellables: Set<AnyCancellable> = []
 
     init() {
         monitor.update(settings.shortcuts)
+        settings.$shortcuts
+            .sink { [weak self] shortcuts in
+                self?.monitor.update(shortcuts)
+                self?.monitor.reset()
+            }
+            .store(in: &cancellables)
         monitor.start { [weak self] event in
             guard let self else { return }
             let action = self.action(from: event)
@@ -74,7 +85,9 @@ final class Pipeline: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.stop()
+            Task { @MainActor in
+                self?.stop()
+            }
         }
     }
 
@@ -116,6 +129,8 @@ final class Pipeline: ObservableObject {
         audioMuter.restore()
         silenceTimer?.invalidate()
         silenceTimer = nil
+        recordingStartContext = nil
+        recordingStartTime = nil
         cleanupRecordingFile()
         RecordingOverlay.shared.hide()
         ProcessingOverlay.shared.hide()
@@ -135,6 +150,9 @@ final class Pipeline: ObservableObject {
         // 重置上次语音时间戳：否则静音检测会沿用上一段录音的时间戳，
         // 导致本次录音刚启动就被误判为“已静音超时”而提前停止（第二次录音失败的根因）。
         lastVoiceTime = nil
+        recordingStartTime = Date()
+        // 在任何浮层或转写耗时影响焦点前，先缓存用户发起录音时的选中文本。
+        recordingStartContext = await context.collect()
 
         // 交互声音：开始
         if settings.playInteractionSound { soundFeedback.playStart() }
@@ -166,6 +184,8 @@ final class Pipeline: ObservableObject {
             logger.error("Failed to start recording: \(error.localizedDescription)")
             lastError = error.localizedDescription
             phase = .idle
+            recordingStartContext = nil
+            recordingStartTime = nil
             cleanupRecordingFile()
             // 启动失败也要恢复静音
             audioMuter.restore()
@@ -193,6 +213,8 @@ final class Pipeline: ObservableObject {
         ProcessingOverlay.shared.show(pipeline: self)
         defer {
             ProcessingOverlay.shared.hide()
+            recordingStartContext = nil
+            recordingStartTime = nil
             cleanupRecordingFile()
             phase = .idle
         }
@@ -201,11 +223,11 @@ final class Pipeline: ObservableObject {
             // 非实时转写：创建引擎，调 transcribeFile
             let asr = makeASREngine()
             let text: String
-            if let url = recordingFileURL {
+            if let url = recordingFileURL, validRecordingFileExists(at: url) {
                 text = try await asr.transcribeFile(url)
             } else {
                 throw NSError(domain: "OpenTypeless", code: 1,
-                              userInfo: [NSLocalizedDescriptionKey: "No recording file to transcribe."])
+                              userInfo: [NSLocalizedDescriptionKey: "No usable recording file was created. Try recording a little longer or check the selected input device."])
             }
             lastTranscript = text
             logger.info("Transcript: \(text)")
@@ -242,7 +264,12 @@ final class Pipeline: ObservableObject {
 
             case .assist:
                 // C：采集选中文本（可选）+ LLM 处理，结果以弹窗显示（不注入文本框）
-                let ctx = await context.collect()
+                let ctx: ContextCollector.CollectedContext
+                if let snapshot = recordingStartContext {
+                    ctx = snapshot
+                } else {
+                    ctx = await context.collect()
+                }
                 let answer = try await assist(transcription: text, context: ctx)
                 ResultOverlay.shared.show(answer: answer)
             }
@@ -268,14 +295,23 @@ final class Pipeline: ObservableObject {
         recordingFileURL = nil
     }
 
+    private func validRecordingFileExists(at url: URL) -> Bool {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = attributes[.size] as? NSNumber else {
+            return false
+        }
+        return size.intValue > 0
+    }
+
     // MARK: - Silence Detection (auto-stop after 2s of silence)
 
     private func startSilenceDetection() {
         silenceTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.phase == .recording else { return }
-                if let lastVoice = self.lastVoiceTime,
-                   Date().timeIntervalSince(lastVoice) > 2.0 {
+                let silenceReference = self.lastVoiceTime ?? self.recordingStartTime
+                if let silenceReference,
+                   Date().timeIntervalSince(silenceReference) > 2.0 {
                     // 静音超过 2 秒，自动停止并走 A（直出）
                     logger.info("Auto-stop after 2s silence")
                     self.handleShortcut(action: .dictate)
@@ -335,10 +371,6 @@ final class Pipeline: ObservableObject {
     // MARK: - Helpers
 
     private func action(from event: ShortcutEvent) -> Action {
-        let configs = [settings.shortcuts.a, settings.shortcuts.b, settings.shortcuts.c]
-        let matched = configs.first {
-            $0.keyCode == event.keyCode && $0.modifierFlags == Int(event.modifiers.rawValue)
-        }
-        return Action(rawValue: matched?.role ?? "A") ?? .dictate
+        Action(rawValue: event.role) ?? .dictate
     }
 }

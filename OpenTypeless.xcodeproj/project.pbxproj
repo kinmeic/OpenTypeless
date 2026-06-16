@@ -79,7 +79,7 @@
 		C301C03899A9212649A9A293 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		C31802BB7ECF77491D085913 /* Pipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pipeline.swift; sourceTree = "<group>"; };
 		C6F3E7EB6A2DD806F710882C /* LLMClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMClient.swift; sourceTree = "<group>"; };
-		C72FD78656798B9757A83977 /* Typeless.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Typeless.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C72FD78656798B9757A83977 /* OpenTypeless.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OpenTypeless.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD30DA128D88EB138D1D0969 /* NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManager.swift; sourceTree = "<group>"; };
 		CF11640B8F518E5D914F2C2F /* MenuBarMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarMenu.swift; sourceTree = "<group>"; };
 		D0EF5BDC0B77E6064D588323 /* SoundFeedback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoundFeedback.swift; sourceTree = "<group>"; };
@@ -196,7 +196,7 @@
 		E9C04359331FACD7E4739CE9 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				C72FD78656798B9757A83977 /* Typeless.app */,
+				C72FD78656798B9757A83977 /* OpenTypeless.app */,
 				52F3C1CE90B96F521693DA49 /* TypelessTests.xctest */,
 			);
 			name = Products;
@@ -238,7 +238,7 @@
 			packageProductDependencies = (
 			);
 			productName = Typeless;
-			productReference = C72FD78656798B9757A83977 /* Typeless.app */;
+			productReference = C72FD78656798B9757A83977 /* OpenTypeless.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -444,14 +444,16 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 					"@loader_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.opentypeless.tests;
 				SDKROOT = macosx;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Typeless.app/Contents/MacOS/Typeless";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/OpenTypeless.app/Contents/MacOS/OpenTypeless";
 			};
 			name = Debug;
 		};
@@ -515,14 +517,16 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 					"@loader_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.opentypeless.tests;
 				SDKROOT = macosx;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Typeless.app/Contents/MacOS/Typeless";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/OpenTypeless.app/Contents/MacOS/OpenTypeless";
 			};
 			name = Release;
 		};

@@ -75,7 +75,7 @@ struct SettingsGeneralTab: View {
                         Text(device.name).tag("\(device.id)")
                     }
                 }
-                .onChange(of: appSettings.audioInputDeviceID) { _ in
+                .onChange(of: appSettings.audioInputDeviceID) { _, _ in
                     // 设备切换时若正在监测，重启监测器以应用新设备
                     if levelMonitor.isRunning {
                         let id = AudioDeviceID(appSettings.audioInputDeviceID) ?? 0
@@ -210,10 +210,24 @@ struct SettingsLLMTab: View {
                 Picker("Provider", selection: $appSettings.llm.asrProvider) {
                     Text("Same as Text Model").tag("same")
                     Text("OpenAI 兼容").tag("openai")
-                    Text("Anthropic 兼容").tag("anthropic")
+                    Text("阿里云百炼 Qwen-ASR").tag("aliyun")
                 }
-                .onChange(of: appSettings.llm.asrProvider) { newValue in
+                .onChange(of: appSettings.llm.asrProvider) { _, newValue in
                     appSettings.llm.asrProviderSameAsText = (newValue == "same")
+                    if newValue == "aliyun" {
+                        if appSettings.llm.asrModel.isEmpty || appSettings.llm.asrModel == "gpt-4o-mini" {
+                            appSettings.llm.asrModel = "qwen3-asr-flash"
+                        }
+                        if appSettings.llm.asrBaseUrl.isEmpty || appSettings.llm.asrBaseUrl == "https://api.openai.com" {
+                            appSettings.llm.asrBaseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+                        }
+                    }
+                }
+
+                if appSettings.llm.asrProvider == "same" && appSettings.llm.textProvider != "openai" {
+                    Text("ASR Model requires an OpenAI-compatible transcription API or Aliyun Qwen-ASR. Choose a dedicated ASR provider here, or set the Text Model provider to OpenAI compatible.")
+                        .font(.caption)
+                        .foregroundColor(.orange)
                 }
 
                 if appSettings.llm.asrProvider != "same" {
@@ -223,7 +237,7 @@ struct SettingsLLMTab: View {
 
                 TextField("Model", text: $appSettings.llm.asrModel)
 
-                Button("Test Connection") {
+                Button("Validate ASR Settings") {
                     testASRConnection()
                 }
                 .disabled(testingASR)

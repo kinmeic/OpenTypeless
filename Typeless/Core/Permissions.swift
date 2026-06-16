@@ -243,14 +243,16 @@ final class Permissions: ObservableObject {
         let status = AudioObjectGetPropertyDataSize(deviceID, &address, 0, nil, &size)
         guard status == noErr, size > 0 else { return false }
         
-        let bufferList = UnsafeMutablePointer<AudioBufferList>.allocate(capacity: Int(size))
-        defer { bufferList.deallocate() }
         var mutableSize = size
-        let getStatus = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &mutableSize, bufferList)
+        guard let rawBuffer = malloc(Int(size)) else { return false }
+        defer { free(rawBuffer) }
+
+        let getStatus = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &mutableSize, rawBuffer)
         guard getStatus == noErr else { return false }
-        
-        let list = bufferList.pointee
-        return list.mNumberBuffers > 0
+
+        let bufferList = UnsafeMutableAudioBufferListPointer(rawBuffer.assumingMemoryBound(to: AudioBufferList.self))
+        let channelCount = bufferList.reduce(0) { $0 + Int($1.mNumberChannels) }
+        return channelCount > 0
     }
 
     private func getPropertyBool(deviceID: AudioDeviceID, selector: AudioObjectPropertySelector) -> Bool {

@@ -1,4 +1,22 @@
 name: OpenTypeless
+schemes:
+  OpenTypeless:
+    build:
+      targets:
+        Typeless: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - TypelessTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
 targets:
   Typeless:
     type: application
@@ -32,5 +50,11 @@ targets:
     deploymentTarget: "14.0"
     sources:
       - TypelessTests
+    settings:
+      base:
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.opentypeless.tests
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/OpenTypeless.app/Contents/MacOS/OpenTypeless"
     dependencies:
       - target: Typeless

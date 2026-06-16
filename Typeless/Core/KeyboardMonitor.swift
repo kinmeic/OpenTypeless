@@ -12,6 +12,7 @@ struct ShortcutEvent: Equatable {
     let keyName: String
     let modifiers: NSEvent.ModifierFlags
     let matchedShortcut: String
+    let role: String
 }
 
 // MARK: - KeyboardMonitor
@@ -21,6 +22,8 @@ struct ShortcutEvent: Equatable {
 /// Requires Input Monitoring permission.
 @MainActor
 final class KeyboardMonitor: ObservableObject {
+    private let shortcutModifierMask: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
+
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var onShortcut: ((ShortcutEvent) -> Void)?
@@ -99,6 +102,9 @@ final class KeyboardMonitor: ObservableObject {
 
     private func handleEvent(type: CGEventType, event: CGEvent) {
         let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
+        let normalizedFlags = NSEvent.ModifierFlags(rawValue: UInt(event.flags.rawValue))
+            .intersection(shortcutModifierMask)
+        pressingModifiers = normalizedFlags
 
         switch type {
         case .keyDown:
@@ -109,8 +115,6 @@ final class KeyboardMonitor: ObservableObject {
             pressingKeyCodes.remove(keyCode)
 
         case .flagsChanged:
-            let flags = NSEvent.ModifierFlags(rawValue: UInt(event.flags.rawValue))
-            pressingModifiers = flags
             // Some shortcuts are modifier-only (e.g. just Option), check those too
             if pressingKeyCodes.isEmpty {
                 checkMatch(keyCode: nil)
@@ -124,9 +128,10 @@ final class KeyboardMonitor: ObservableObject {
     private func checkMatch(keyCode: Int?) {
         for shortcut in shortcuts {
             let targetModifiers = NSEvent.ModifierFlags(rawValue: UInt(shortcut.modifierFlags))
+                .intersection(shortcutModifierMask)
             let targetKeyCode = shortcut.keyCode
 
-            let modifiersMatch = pressingModifiers.contains(targetModifiers)
+            let modifiersMatch = pressingModifiers == targetModifiers
             let keyMatch = keyCode.map { $0 == targetKeyCode } ?? (targetKeyCode == 0)
 
             guard modifiersMatch && keyMatch else { continue }
@@ -137,7 +142,8 @@ final class KeyboardMonitor: ObservableObject {
                 keyCode: targetKeyCode,
                 keyName: keyName,
                 modifiers: pressingModifiers,
-                matchedShortcut: shortcutString
+                matchedShortcut: shortcutString,
+                role: shortcut.role
             )
             onShortcut?(event)
             return // match one at a time

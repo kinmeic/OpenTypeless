@@ -21,6 +21,8 @@ struct LLMConfig: Codable, Equatable {
     var asrProviderSameAsText: Bool = true
 }
 
+private let supportedASRProviders: Set<String> = ["same", "openai", "aliyun"]
+
 // ASRConfig is defined in Core/ASREngine.swift (the canonical version).
 
 struct ShortcutConfig: Codable, Equatable {
@@ -78,7 +80,22 @@ final class AppSettings: ObservableObject {
     // MARK: - Init
 
     private init() {
-        self.llm = Self.load(key: "llm") ?? LLMConfig()
+        var loadedLLM = Self.load(key: "llm") ?? LLMConfig()
+        loadedLLM.asrProvider = loadedLLM.asrProvider.lowercased()
+        if supportedASRProviders.contains(loadedLLM.asrProvider) == false {
+            loadedLLM.asrProvider = "openai"
+            loadedLLM.asrProviderSameAsText = false
+        }
+        if loadedLLM.asrProvider == "aliyun" {
+            loadedLLM.asrProviderSameAsText = false
+            if loadedLLM.asrModel.isEmpty || loadedLLM.asrModel == "gpt-4o-mini" {
+                loadedLLM.asrModel = "qwen3-asr-flash"
+            }
+            if loadedLLM.asrBaseUrl.isEmpty || loadedLLM.asrBaseUrl == "https://api.openai.com" {
+                loadedLLM.asrBaseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            }
+        }
+        self.llm = loadedLLM
         self.asr = Self.load(key: "asr") ?? ASRConfig()
         self.shortcuts = Self.load(key: "shortcuts") ?? ShortcutsConfig()
         self.targetLanguage = UserDefaults.standard.string(forKey: "targetLanguage") ?? "English"

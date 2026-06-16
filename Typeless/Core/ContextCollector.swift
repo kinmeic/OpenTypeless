@@ -66,6 +66,9 @@ final class ContextCollector {
         ) == .success else {
             return nil
         }
+        guard let focusedRef, CFGetTypeID(focusedRef) == AXUIElementGetTypeID() else {
+            return nil
+        }
         return (focusedRef as! AXUIElement)
     }
 
@@ -83,6 +86,9 @@ final class ContextCollector {
                 kAXParentAttribute as CFString,
                 &parentRef
             ) == .success else {
+                break
+            }
+            guard let parentRef, CFGetTypeID(parentRef) == AXUIElementGetTypeID() else {
                 break
             }
             current = (parentRef as! AXUIElement)

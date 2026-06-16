@@ -94,7 +94,11 @@ final class AudioRecorder {
         let level = AudioMeterCalculator.audioLevel(from: buffer)
         let handler = onLevel
         if let file = outputFile {
-            try? file.write(from: buffer)
+            do {
+                try file.write(from: buffer)
+            } catch {
+                logger.error("Could not write audio buffer: \(error.localizedDescription)")
+            }
         }
         // 电平回调在队列外触发，避免阻塞串行队列
         if let handler {

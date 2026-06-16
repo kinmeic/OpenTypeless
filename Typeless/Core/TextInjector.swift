@@ -8,14 +8,13 @@ private let logger = Logger(subsystem: "com.opentypeless.app", category: "inject
 
 /// 把文字注入到当前焦点文本框。
 ///
-/// 两条路径（同 Typeless InputHelper）：
-/// - 路径 A（优先）：AX API 直写 `kAXValueAttribute`，对原生 App / Electron 友好。
-/// - 路径 B（兜底）：剪贴板 + 模拟 ⌘V，兼容任意支持粘贴的应用。
+/// 通过剪贴板 + 模拟 ⌘V 插入到当前焦点位置。
 ///
-/// 两条路径都需要 Accessibility 权限。
+/// 早期 AX `kAXValueAttribute` 直写会替换整个输入框内容；这里默认走粘贴路径，
+/// 以保留目标 App 的光标、选区和已有文本。
 @MainActor
 final class TextInjector {
-    /// 高层入口：自动选路径 A，失败降级 B。
+    /// 高层入口：写入剪贴板、模拟粘贴，然后恢复剪贴板。
     func insert(_ text: String) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty == false else {
@@ -23,59 +22,10 @@ final class TextInjector {
             return
         }
 
-        // 路径 A：AX API 直写
-        if axInsert(trimmed) {
-            logger.info("Inserted via AX API (\(trimmed.count) chars)")
-            return
-        }
-
-        // 路径 B：剪贴板 + 模拟 ⌘V
-        logger.info("AX insert failed, falling back to pasteboard + ⌘V")
         await pasteInsert(trimmed)
     }
 
-    // MARK: - Path A: AX API Direct Write
-
-    /// 通过 Accessibility API 直接设置焦点元素的 value。
-    /// 返回 true 表示成功（AXUIElement 响应 kAXValueAttribute）。
-    private func axInsert(_ text: String) -> Bool {
-        guard AXIsProcessTrusted() else {
-            logger.error("Accessibility permission not granted")
-            return false
-        }
-
-        let focusedElement: AXUIElement?
-        var focusedRef: CFTypeRef?
-        if AXUIElementCopyAttributeValue(
-            AXUIElementCreateSystemWide(),
-            kAXFocusedUIElementAttribute as CFString,
-            &focusedRef
-        ) == .success {
-            focusedElement = (focusedRef as! AXUIElement)
-        } else {
-            focusedElement = nil
-        }
-
-        guard let focused = focusedElement else {
-            logger.warning("No focused AXUIElement found")
-            return false
-        }
-
-        // 尝试直接设值
-        let result = AXUIElementSetAttributeValue(
-            focused,
-            kAXValueAttribute as CFString,
-            text as CFTypeRef
-        )
-        if result == .success {
-            return true
-        }
-
-        logger.warning("AX setAttribute failed: \(result.rawValue)")
-        return false
-    }
-
-    // MARK: - Path B: Pasteboard + Simulated ⌘V
+    // MARK: - Pasteboard + Simulated ⌘V
 
     /// 备份当前剪贴板 → 写入目标文字 → 模拟 ⌘V → 等待 → 还原剪贴板。
     /// 关键时序：restorePasteboard 必须在 paste 完成之后，否则粘贴读到的是还原后的旧内容。
@@ -88,8 +38,8 @@ final class TextInjector {
 
         simulateCmdV()
 
-        // 双保险等待粘贴完成（参照 Typeless：PasteDone 回调 + setTimeout(100ms)）
-        try? await Task.sleep(for: .milliseconds(150))
+        // CGEventPost 没有粘贴完成回调；给慢应用留出读取剪贴板的时间。
+        try? await Task.sleep(for: .milliseconds(350))
 
         restorePasteboard(snapshot, to: pasteboard)
         logger.info("Inserted via pasteboard+⌘V and restored clipboard (\(text.count) chars)")

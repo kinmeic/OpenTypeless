@@ -105,7 +105,7 @@ final class HALAudioInput {
 
     /// 消费者队列：实时线程只入队索引，这里取数据包成 AVAudioPCMBuffer。
     private let dispatchQueue = DispatchQueue(label: "OpenTypeless.HALAudioInput.dispatch", qos: .userInitiated)
-    /// stop() 同步屏障队列：保证停止时无回调在跑。
+    /// stop() 同步屏障：保证释放 Context 前没有 AudioUnit 回调仍在排队。
     private let stopBarrier = DispatchSemaphore(value: 1)
 
     func start(deviceID: AudioDeviceID = 0, preferredBufferSize: UInt32 = 1024) throws {
@@ -132,12 +132,12 @@ final class HALAudioInput {
         let channels = try inputChannelCount(for: actualDeviceID)
 
         var enableInput: UInt32 = 1
-        try setProperty(unit, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Input, 1, &enableInput, "enableInput")
+        try setUInt32Property(unit, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Input, 1, &enableInput, "enableInput")
         var disableOutput: UInt32 = 0
-        try setProperty(unit, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Output, 0, &disableOutput, "disableOutput")
+        try setUInt32Property(unit, kAudioOutputUnitProperty_EnableIO, kAudioUnitScope_Output, 0, &disableOutput, "disableOutput")
 
         var id = actualDeviceID
-        try setProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &id, "currentDevice")
+        try setAudioDeviceIDProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &id, "currentDevice")
         if deviceID == 0 {
             logger.info("HALAudioInput: using default device \(actualDeviceID)")
         } else {
@@ -145,7 +145,7 @@ final class HALAudioInput {
         }
 
         var streamFormat = Self.floatInputFormat(sampleRate: sampleRate, channelCount: channels)
-        try setProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 1, &streamFormat, "streamFormat")
+        try setStreamFormatProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 1, &streamFormat, "streamFormat")
         var acceptedFormat = AudioStreamBasicDescription()
         var fmtSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
         let fmtStatus = AudioUnitGetProperty(unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 1, &acceptedFormat, &fmtSize)
@@ -160,7 +160,7 @@ final class HALAudioInput {
         outputFormat = AVAudioFormat(standardFormatWithSampleRate: outputSampleRate, channels: UInt32(outputChannels))!
 
         var maxFrames: UInt32 = preferredBufferSize
-        try setProperty(unit, kAudioUnitProperty_MaximumFramesPerSlice, kAudioUnitScope_Global, 0, &maxFrames, "maxFrames")
+        try setUInt32Property(unit, kAudioUnitProperty_MaximumFramesPerSlice, kAudioUnitScope_Global, 0, &maxFrames, "maxFrames")
 
         let ownerPtr = Unmanaged.passUnretained(self).toOpaque()
         let context = Context(ownerPtr: ownerPtr, audioUnit: unit, sampleRate: outputSampleRate, channelCount: outputChannels, maxFrames: Int(maxFrames))
@@ -170,7 +170,7 @@ final class HALAudioInput {
             inputProc: halInputCallback,
             inputProcRefCon: Unmanaged.passUnretained(context).toOpaque()
         )
-        try setProperty(unit, kAudioOutputUnitProperty_SetInputCallback, kAudioUnitScope_Global, 0, &callbackStruct, "inputCallback")
+        try setCallbackProperty(unit, kAudioOutputUnitProperty_SetInputCallback, kAudioUnitScope_Global, 0, &callbackStruct, "inputCallback")
 
         let initStatus = AudioUnitInitialize(unit)
         guard initStatus == noErr else { throw HALError.initializeFailed(initStatus) }
@@ -183,18 +183,23 @@ final class HALAudioInput {
         logger.info("HALAudioInput started")
     }
 
-    /// 停止采集。用 stopBarrier 保证退出时无回调在跑。
+    /// 停止采集。等待实时回调和消费者队列清空后，再释放 Context/ring buffer。
     func stop() {
         guard let unit = audioUnit else { return }
-        // 同步屏障：等当前回调（若有）执行完
-        stopBarrier.wait()
-        defer { stopBarrier.signal() }
 
         if isRunning {
             AudioOutputUnitStop(unit)
-            AudioUnitUninitialize(unit)
             isRunning = false
         }
+
+        // AudioOutputUnitStop 返回后不应再有新回调；这里等待可能正在退出的回调完成入队。
+        stopBarrier.wait()
+        stopBarrier.signal()
+
+        // 回调入队的消费者闭包会读取 Context.slots；必须等它们都执行完才能释放 context。
+        dispatchQueue.sync {}
+
+        AudioUnitUninitialize(unit)
         AudioComponentInstanceDispose(unit)
         audioUnit = nil
         context = nil
@@ -210,6 +215,10 @@ final class HALAudioInput {
     /// 异步通知消费者（DispatchQueue.async 本身是轻量的，不在实时线程上跑 Swift 对象操作）。
     private let halInputCallback: AURenderCallback = { inRefCon, _, inTimeStamp, _, inNumberFrames, _ in
         let ctx = Unmanaged<Context>.fromOpaque(inRefCon).takeUnretainedValue()
+        let owner = Unmanaged<HALAudioInput>.fromOpaque(ctx.ownerPtr).takeUnretainedValue()
+        owner.stopBarrier.wait()
+        defer { owner.stopBarrier.signal() }
+
         let unit = ctx.audioUnit
         let channelCount = ctx.channelCount
         let frames = Int(inNumberFrames)
@@ -246,18 +255,16 @@ final class HALAudioInput {
             ctx.writeIndex.pointee = (writeSlot + 1) % slotCount
 
             // 4. 捕获要传递给消费者的值（都是值类型，闭包不捕获 self/Context 的 ARC）
-            let ownerPtr = ctx.ownerPtr
             let sampleRate = ctx.sampleRate
             let ch = UInt32(channelCount)
             let slot = writeSlot
             let framesCopy = frames
             let maxFrames = ctx.maxFrames
-            let slotFloats = ctx.slotFloats
             let slotsBasePtr = ctx.slots  // 裸指针，UnsafePointer 传递，消费者会拷贝
 
             // 5. 异步分发到消费者线程（闭包里做拷贝和 AVAudioPCMBuffer 创建）
-            DispatchQueue.global(qos: .userInitiated).async {
-                let owner = Unmanaged<HALAudioInput>.fromOpaque(ownerPtr).takeUnretainedValue()
+            owner.dispatchQueue.async { [weak owner] in
+                guard let owner else { return }
                 guard let cb = owner.onBuffer else { return }
 
                 guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: ch),
@@ -266,10 +273,6 @@ final class HALAudioInput {
 
                 // 拷贝当前槽的数据到 pcmBuffer（slot 数据可能已被下一帧覆盖，但概率极低：
                 // slotCount=4，消费者延迟通常远小于 4 帧）
-                _ = slotFloats
-                _ = maxFrames
-                _ = slotsBasePtr
-                // 直接从 slots 读取（按槽/channel 偏移）
                 let slotOffset = slot * (channelCount * maxFrames)
                 for i in 0..<channelCount {
                     let src = slotsBasePtr.advanced(by: slotOffset + i * maxFrames)
@@ -362,9 +365,23 @@ final class HALAudioInput {
         return channelCount
     }
 
-    private func setProperty<T>(_ unit: AudioUnit, _ prop: AudioUnitPropertyID, _ scope: AudioUnitScope, _ element: AudioUnitElement, _ value: inout T, _ name: String) throws {
-        let size = UInt32(MemoryLayout<T>.size)
-        let status = AudioUnitSetProperty(unit, prop, scope, element, &value, size)
+    private func setUInt32Property(_ unit: AudioUnit, _ prop: AudioUnitPropertyID, _ scope: AudioUnitScope, _ element: AudioUnitElement, _ value: inout UInt32, _ name: String) throws {
+        let status = AudioUnitSetProperty(unit, prop, scope, element, &value, UInt32(MemoryLayout<UInt32>.size))
+        guard status == noErr else { throw HALError.setPropertyFailed(name, status) }
+    }
+
+    private func setAudioDeviceIDProperty(_ unit: AudioUnit, _ prop: AudioUnitPropertyID, _ scope: AudioUnitScope, _ element: AudioUnitElement, _ value: inout AudioDeviceID, _ name: String) throws {
+        let status = AudioUnitSetProperty(unit, prop, scope, element, &value, UInt32(MemoryLayout<AudioDeviceID>.size))
+        guard status == noErr else { throw HALError.setPropertyFailed(name, status) }
+    }
+
+    private func setStreamFormatProperty(_ unit: AudioUnit, _ prop: AudioUnitPropertyID, _ scope: AudioUnitScope, _ element: AudioUnitElement, _ value: inout AudioStreamBasicDescription, _ name: String) throws {
+        let status = AudioUnitSetProperty(unit, prop, scope, element, &value, UInt32(MemoryLayout<AudioStreamBasicDescription>.size))
+        guard status == noErr else { throw HALError.setPropertyFailed(name, status) }
+    }
+
+    private func setCallbackProperty(_ unit: AudioUnit, _ prop: AudioUnitPropertyID, _ scope: AudioUnitScope, _ element: AudioUnitElement, _ value: inout AURenderCallbackStruct, _ name: String) throws {
+        let status = AudioUnitSetProperty(unit, prop, scope, element, &value, UInt32(MemoryLayout<AURenderCallbackStruct>.size))
         guard status == noErr else { throw HALError.setPropertyFailed(name, status) }
     }
 }
