@@ -23,10 +23,18 @@ struct ShortcutEvent: Equatable {
 @MainActor
 final class KeyboardMonitor: ObservableObject {
     private let shortcutModifierMask: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
+    private let healthCheckInterval: TimeInterval = 5
+    private let installRetryInterval: TimeInterval = 30
+    private let installFailureLogInterval: TimeInterval = 30
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
+    private var healthCheckTimer: Timer?
+    private var didBecomeActiveObserver: NSObjectProtocol?
     private var onShortcut: ((ShortcutEvent) -> Void)?
+    private var isMonitoring = false
+    private var lastInstallAttemptTime = Date.distantPast
+    private var lastInstallFailureLogTime = Date.distantPast
 
     var shortcuts: [ShortcutConfig] = [] {
         didSet { logger.info("Shortcuts updated: \(self.shortcuts.count) items") }
@@ -44,47 +52,26 @@ final class KeyboardMonitor: ObservableObject {
 
     func start(onShortcut: @escaping (ShortcutEvent) -> Void) {
         self.onShortcut = onShortcut
+        isMonitoring = true
+        reset()
 
-        let mask = (1 << CGEventType.keyDown.rawValue)
-            | (1 << CGEventType.keyUp.rawValue)
-            | (1 << CGEventType.flagsChanged.rawValue)
-
-        let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: CGEventMask(mask),
-            callback: { proxy, type, event, info in
-                guard let info else { return Unmanaged.passUnretained(event) }
-                let me = Unmanaged<KeyboardMonitor>.fromOpaque(info).takeUnretainedValue()
-                let shouldConsume = MainActor.assumeIsolated {
-                    me.handleEvent(type: type, event: event)
-                }
-                return shouldConsume ? nil : Unmanaged.passUnretained(event)
-            },
-            userInfo: Unmanaged.passUnretained(self).toOpaque()
-        )
-
-        guard let tap else {
-            logger.error("CGEvent.tapCreate returned nil — Input Monitoring permission not granted")
-            return
+        let installed = installEventTap(reason: "start", force: true)
+        startHealthCheck()
+        startActivationRecovery()
+        if installed {
+            logger.info("Keyboard monitor started")
+        } else {
+            logger.info("Keyboard monitor waiting for Input Monitoring permission")
         }
-
-        self.eventTap = tap
-        let src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        self.runLoopSource = src
-        CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
-        CGEvent.tapEnable(tap: tap, enable: true)
-        logger.info("Keyboard monitor started")
     }
 
     func stop() {
-        if let src = runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .commonModes)
-            runLoopSource = nil
-        }
-        eventTap = nil
+        isMonitoring = false
+        stopHealthCheck()
+        stopActivationRecovery()
+        teardownEventTap()
         onShortcut = nil
+        reset()
         logger.info("Keyboard monitor stopped")
     }
 
@@ -97,10 +84,181 @@ final class KeyboardMonitor: ObservableObject {
         pressingKeyCodes.removeAll()
     }
 
+    // MARK: - Event Tap Lifecycle
+
+    private var eventMask: CGEventMask {
+        let mask = (1 << CGEventType.keyDown.rawValue)
+            | (1 << CGEventType.keyUp.rawValue)
+            | (1 << CGEventType.flagsChanged.rawValue)
+        return CGEventMask(mask)
+    }
+
+    @discardableResult
+    private func installEventTap(reason: String, force: Bool) -> Bool {
+        let now = Date()
+        if force == false && now.timeIntervalSince(lastInstallAttemptTime) < installRetryInterval {
+            return false
+        }
+        lastInstallAttemptTime = now
+        teardownEventTap()
+
+        let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: eventMask,
+            callback: { proxy, type, event, info in
+                guard let info else { return Unmanaged.passUnretained(event) }
+                let me = Unmanaged<KeyboardMonitor>.fromOpaque(info).takeUnretainedValue()
+                let shouldConsume = MainActor.assumeIsolated {
+                    me.handleEvent(type: type, event: event)
+                }
+                return shouldConsume ? nil : Unmanaged.passUnretained(event)
+            },
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
+        )
+
+        guard let tap else {
+            logEventTapInstallFailure(reason: reason)
+            return false
+        }
+
+        self.eventTap = tap
+        let src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        self.runLoopSource = src
+        CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+        lastInstallAttemptTime = .distantPast
+        lastInstallFailureLogTime = .distantPast
+        logger.info("Keyboard event tap installed: \(reason, privacy: .public)")
+        return true
+    }
+
+    private func teardownEventTap() {
+        if let src = runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .commonModes)
+            runLoopSource = nil
+        }
+
+        if let tap = eventTap {
+            CGEvent.tapEnable(tap: tap, enable: false)
+            CFMachPortInvalidate(tap)
+            eventTap = nil
+        }
+    }
+
+    private func startHealthCheck() {
+        stopHealthCheck()
+
+        let timer = Timer(timeInterval: healthCheckInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.verifyEventTapHealth()
+            }
+        }
+        healthCheckTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func stopHealthCheck() {
+        healthCheckTimer?.invalidate()
+        healthCheckTimer = nil
+    }
+
+    private func verifyEventTapHealth() {
+        guard isMonitoring else { return }
+
+        guard let tap = eventTap else {
+            restartEventTap(reason: "missing event tap", force: false)
+            return
+        }
+
+        guard CFMachPortIsValid(tap) else {
+            restartEventTap(reason: "invalid event tap", force: true)
+            return
+        }
+
+        if CGEvent.tapIsEnabled(tap: tap) == false {
+            enableCurrentEventTap(reason: "health check found disabled event tap")
+        }
+    }
+
+    private func enableCurrentEventTap(reason: String) {
+        guard isMonitoring else { return }
+
+        guard let tap = eventTap, CFMachPortIsValid(tap) else {
+            restartEventTap(reason: reason, force: true)
+            return
+        }
+
+        CGEvent.tapEnable(tap: tap, enable: true)
+        logger.warning("Keyboard event tap re-enabled: \(reason, privacy: .public)")
+
+        if CGEvent.tapIsEnabled(tap: tap) == false {
+            restartEventTap(reason: "\(reason); re-enable failed", force: true)
+        }
+    }
+
+    private func restartEventTap(reason: String, force: Bool) {
+        guard isMonitoring else { return }
+        reset()
+        logger.warning("Restarting keyboard event tap: \(reason, privacy: .public)")
+        _ = installEventTap(reason: reason, force: force)
+    }
+
+    private func startActivationRecovery() {
+        stopActivationRecovery()
+        didBecomeActiveObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.recoverEventTapAfterActivation()
+            }
+        }
+    }
+
+    private func stopActivationRecovery() {
+        if let didBecomeActiveObserver {
+            NotificationCenter.default.removeObserver(didBecomeActiveObserver)
+            self.didBecomeActiveObserver = nil
+        }
+    }
+
+    private func recoverEventTapAfterActivation() {
+        guard isMonitoring else { return }
+        guard let tap = eventTap, CFMachPortIsValid(tap) else {
+            restartEventTap(reason: "app became active", force: true)
+            return
+        }
+
+        if CGEvent.tapIsEnabled(tap: tap) == false {
+            enableCurrentEventTap(reason: "app became active")
+        }
+    }
+
+    private func logEventTapInstallFailure(reason: String) {
+        let now = Date()
+        guard now.timeIntervalSince(lastInstallFailureLogTime) >= installFailureLogInterval else { return }
+        lastInstallFailureLogTime = now
+        logger.error("CGEvent.tapCreate returned nil (\(reason, privacy: .public)); Input Monitoring permission may be missing")
+    }
+
     // MARK: - Event Handling
 
     /// Returns true when the original event should be swallowed.
     private func handleEvent(type: CGEventType, event: CGEvent) -> Bool {
+        switch type {
+        case .tapDisabledByTimeout:
+            enableCurrentEventTap(reason: "disabled by timeout")
+            return false
+        case .tapDisabledByUserInput:
+            enableCurrentEventTap(reason: "disabled by user input")
+            return false
+        default:
+            break
+        }
+
         let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
         let normalizedFlags = NSEvent.ModifierFlags(rawValue: UInt(event.flags.rawValue))
             .intersection(shortcutModifierMask)

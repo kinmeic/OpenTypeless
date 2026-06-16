@@ -181,14 +181,26 @@ struct PermissionRow: View {
     let action: () -> Void
     var helpText: LocalizedStringKey? = nil
 
+    @State private var showHelp = false
+
     var body: some View {
         HStack {
             Text(label)
             if let helpText {
-                Image(systemName: "info.circle")
-                    .imageScale(.small)
-                    .foregroundColor(.secondary)
-                    .help(helpText)
+                Button {
+                    showHelp.toggle()
+                } label: {
+                    Image(systemName: "info.circle")
+                        .imageScale(.small)
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .popover(isPresented: $showHelp, arrowEdge: .top) {
+                    Text(helpText)
+                        .font(.caption)
+                        .padding(10)
+                        .frame(maxWidth: 320)
+                }
             }
             Spacer()
             Image(systemName: granted ? "checkmark.circle.fill" : "xmark.circle.fill")
@@ -336,14 +348,14 @@ struct SettingsASRTab: View {
 
             Section("Translation") {
                 Picker("Target Language", selection: $appSettings.targetLanguage) {
-                    Text("英语").tag("English")
+                    Text("English").tag("English")
                     Text("中文").tag("Chinese")
-                    Text("日语").tag("Japanese")
-                    Text("韩语").tag("Korean")
-                    Text("法语").tag("French")
-                    Text("西班牙语").tag("Spanish")
-                    Text("德语").tag("German")
-                    Text("意大利语").tag("Italian")
+                    Text("日本語").tag("Japanese")
+                    Text("한국어").tag("Korean")
+                    Text("Français").tag("French")
+                    Text("Español").tag("Spanish")
+                    Text("Deutsch").tag("German")
+                    Text("Italiano").tag("Italian")
                 }
             }
         }
