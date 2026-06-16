@@ -39,11 +39,37 @@ final class SystemSpeechASR: ASREngine {
     private var sharedRecognizer: SFSpeechRecognizer?
     /// 跟踪当前/上一个 recognition task，用于在启动新 task 前取消旧 task，避免资源冲突。
     private var previousRecognitionTask: SFSpeechRecognitionTask?
+    /// 保护 previousRecognitionTask 的锁：recognitionTask 回调在 Apple 内部线程执行，
+    /// 而 transcribe 在调用线程赋值 task，二者存在数据竞争，必须加锁同步。
+    private let taskLock = NSLock()
     /// 超时哨兵值：正常转写不会产生该内容，用于区分"超时被截断"与"无识别结果"。
     private static let timeoutSentinel = "\u{0}__OPENTYPELESS_ASR_TIMEOUT__"
 
     init(config: ASRConfig) {
         self.config = config
+    }
+
+    /// 取消并清空上一个 recognition task（线程安全）。
+    private func cancelPreviousTask() {
+        taskLock.lock()
+        let previous = previousRecognitionTask
+        previousRecognitionTask = nil
+        taskLock.unlock()
+        previous?.cancel()
+    }
+
+    /// 设置当前 recognition task（线程安全）。
+    private func setCurrentTask(_ task: SFSpeechRecognitionTask) {
+        taskLock.lock()
+        previousRecognitionTask = task
+        taskLock.unlock()
+    }
+
+    /// 清空当前 recognition task 引用（线程安全，仅清空不取消）。
+    private func clearCurrentTask() {
+        taskLock.lock()
+        previousRecognitionTask = nil
+        taskLock.unlock()
     }
 
     // MARK: - Batch (non-realtime) transcription
@@ -90,11 +116,9 @@ final class SystemSpeechASR: ASREngine {
     /// 使用 hasResumed flag 防止 double-resume，并在回调未提供 final/error 时
     /// （如 recognizer 直接结束）也 resume，避免 Task 永久挂起。
     private func transcribe(url: URL, with recognizer: SFSpeechRecognizer, languageID: String) async -> String {
-        // 取消前一个可能还在运行的 task，避免资源冲突
-        if let previousTask = previousRecognitionTask {
-            previousTask.cancel()
-        }
-        
+        // 取消前一个可能还在运行的 task，避免资源冲突（线程安全）
+        cancelPreviousTask()
+
         return await withCheckedContinuation { continuation in
             let request = SFSpeechURLRecognitionRequest(url: url)
             request.shouldReportPartialResults = false
@@ -118,33 +142,32 @@ final class SystemSpeechASR: ASREngine {
             let task = recognizer.recognitionTask(with: request) { [weak self] result, error in
                 if let error {
                     logger.warning("File recognition [\(languageID)] error: \(error.localizedDescription)")
-                    self?.previousRecognitionTask = nil
+                    self?.clearCurrentTask()
                     resumeOnce("")
                     return
                 }
                 if let result {
                     if result.isFinal {
                         let text = result.bestTranscription.formattedString
-                        self?.previousRecognitionTask = nil
+                        self?.clearCurrentTask()
                         resumeOnce(text)
                     }
                     // 非 final：忽略，等最终结果
                 } else {
                     // 无 result 无 error（recognizer 异常结束）：resume 空串避免挂起
-                    self?.previousRecognitionTask = nil
+                    self?.clearCurrentTask()
                     resumeOnce("")
                 }
             }
-            
-            self.previousRecognitionTask = task
+
+            self.setCurrentTask(task)
 
             // 兜底：如果 recognizer 因系统限制（如 ~1 分钟单任务上限）迟迟不回调，
             // 75 秒后强制取消并 resume，防止 Task 永久挂起，同时给系统 URL 识别约 1 分钟的任务上限留余量。
             // 用哨兵值标记"超时"（区别于真正返回空串的"无识别结果"），上层据此抛更准确的错误。
             DispatchQueue.global().asyncAfter(deadline: .now() + 75) { [weak self] in
-                self?.previousRecognitionTask?.cancel()
+                self?.cancelPreviousTask()
                 resumeOnce(Self.timeoutSentinel)
-                self?.previousRecognitionTask = nil
             }
         }
     }

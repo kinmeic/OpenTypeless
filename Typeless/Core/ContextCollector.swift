@@ -195,12 +195,22 @@ final class ContextCollector {
         try? await Task.sleep(for: .milliseconds(160))
 
         let copiedText: String?
-        if pasteboard.changeCount != beforeChangeCount {
+        // 记录读取内容时的 changeCount；若它与 beforeChangeCount 不同，说明是我们触发的 Cmd+C 生效了。
+        let afterCopyChangeCount = pasteboard.changeCount
+        if afterCopyChangeCount != beforeChangeCount {
             copiedText = nonEmpty(pasteboard.string(forType: .string) ?? "")
         } else {
             copiedText = nil
         }
-        restorePasteboard(snapshot, to: pasteboard)
+
+        // 还原前再次检查 changeCount：若读取后到还原前剪贴板又被第三方写入
+        // （例如用户在此窗口期手动复制了内容），则不还原，避免覆盖用户新复制的内容。
+        // 这是一种尽力而为的竞态缓解——极小窗口期内的并发写入仍可能丢失。
+        if pasteboard.changeCount == afterCopyChangeCount {
+            restorePasteboard(snapshot, to: pasteboard)
+        } else {
+            logger.info("Skipped clipboard restore: third-party change detected (changeCount \(afterCopyChangeCount) → \(pasteboard.changeCount))")
+        }
         return copiedText
     }
 

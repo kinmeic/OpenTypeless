@@ -53,7 +53,9 @@ final class Permissions: ObservableObject {
     }
 
     private func startSteadyPermissionPolling() {
-        let timer = Timer(timeInterval: 2.0, repeats: true) { [weak self] _ in
+        // AXIsProcessTrusted() 等结果只在用户于系统设置中操作时才会变化，
+        // 稳态轮询无需太频繁——5 秒足以在用户切换授权后及时反映。
+        let timer = Timer(timeInterval: 5.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.refreshPermissionStatuses()
             }
