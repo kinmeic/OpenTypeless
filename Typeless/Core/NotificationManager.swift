@@ -12,17 +12,24 @@ final class NotificationManager: ObservableObject {
     @Published var lastErrorTitle: String?
     @Published var lastErrorMessage: String?
 
-    private init() {
-        requestAuthorization()
+    private init() {}
+
+    func requestAuthorizationIfNeeded() {
+        guard AppSettings.shared.enableSystemNotifications else { return }
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            guard settings.authorizationStatus == .notDetermined else { return }
+            Self.requestAuthorization()
+        }
     }
 
-    private func requestAuthorization() {
+    nonisolated private static func requestAuthorization(completion: ((Bool) -> Void)? = nil) {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
             if let error {
                 logger.error("Notification auth failed: \(error.localizedDescription)")
             } else {
                 logger.info("Notification authorization: \(granted)")
             }
+            completion?(granted)
         }
     }
 
@@ -31,6 +38,33 @@ final class NotificationManager: ObservableObject {
         lastErrorTitle = title
         lastErrorMessage = message
 
+        guard AppSettings.shared.enableSystemNotifications else {
+            logger.info("System notification skipped because notifications are disabled")
+            return
+        }
+
+        postNotification(title: title, message: message)
+    }
+
+    private func postNotification(title: String, message: String) {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            switch settings.authorizationStatus {
+            case .authorized, .provisional, .ephemeral:
+                Self.addNotification(title: title, message: message)
+            case .notDetermined:
+                Self.requestAuthorization { granted in
+                    guard granted else { return }
+                    Self.addNotification(title: title, message: message)
+                }
+            case .denied:
+                logger.warning("System notification skipped because authorization is denied")
+            @unknown default:
+                logger.warning("System notification skipped because authorization status is unknown")
+            }
+        }
+    }
+
+    nonisolated private static func addNotification(title: String, message: String) {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = message

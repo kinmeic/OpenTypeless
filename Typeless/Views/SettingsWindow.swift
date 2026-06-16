@@ -120,6 +120,15 @@ struct SettingsGeneralTab: View {
                 Toggle("Mute system output while recording", isOn: $appSettings.muteSystemAudioDuringRecording)
                 Toggle("Play interaction sound", isOn: $appSettings.playInteractionSound)
             }
+
+            Section("Notifications") {
+                Toggle("Show system notifications", isOn: $appSettings.enableSystemNotifications)
+                    .onChange(of: appSettings.enableSystemNotifications) { _, enabled in
+                        if enabled {
+                            NotificationManager.shared.requestAuthorizationIfNeeded()
+                        }
+                    }
+            }
         }
         .formStyle(.grouped)
         .onAppear {

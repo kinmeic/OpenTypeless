@@ -76,11 +76,17 @@ struct MenuBarMenu: View {
 
     @ViewBuilder
     private var audioInputSection: some View {
-        Menu("Audio Input Source") {
+        Menu("Audio Input Device") {
+            let isSystemDefaultSelected = appSettings.audioInputDeviceID.isEmpty
+            Button(isSystemDefaultSelected ? "✓ System Default" : "System Default") {
+                appSettings.audioInputDeviceID = ""
+            }
+
             if permissions.audioDevices.isEmpty {
                 Text("No audio devices found")
                     .foregroundColor(.secondary)
             } else {
+                Divider()
                 ForEach(permissions.audioDevices, id: \.id) { device in
                     let isSelected = device.id == appSettings.audioInputDeviceID
                     Button(isSelected ? "✓ \(device.name)" : device.name) {

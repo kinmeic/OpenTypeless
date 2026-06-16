@@ -77,6 +77,11 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(playInteractionSound, forKey: "playInteractionSound") }
     }
 
+    /// 是否推送 macOS 系统通知；关闭后仍会在菜单栏内显示错误状态。
+    @Published var enableSystemNotifications: Bool {
+        didSet { UserDefaults.standard.set(enableSystemNotifications, forKey: "enableSystemNotifications") }
+    }
+
     // MARK: - Init
 
     private init() {
@@ -103,6 +108,7 @@ final class AppSettings: ObservableObject {
         // 注意：上面 audioInputDeviceID 的 didSet 不会触发（init 直接赋值），这里手动存一次以保证键名一致
         self.muteSystemAudioDuringRecording = UserDefaults.standard.object(forKey: "muteSystemAudioDuringRecording") as? Bool ?? false
         self.playInteractionSound = UserDefaults.standard.object(forKey: "playInteractionSound") as? Bool ?? true
+        self.enableSystemNotifications = UserDefaults.standard.object(forKey: "enableSystemNotifications") as? Bool ?? true
         logger.info("Settings loaded")
     }
 
