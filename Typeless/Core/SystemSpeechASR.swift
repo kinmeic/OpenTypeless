@@ -32,6 +32,10 @@ final class SystemSpeechASR: ASREngine {
     }
 
     private let config: ASRConfig
+    /// 复用同一个 SFSpeechRecognizer 实例，避免短时间内连续创建新 recognizer 导致 task 失败。
+    private var sharedRecognizer: SFSpeechRecognizer?
+    /// 跟踪当前/上一个 recognition task，用于在启动新 task 前取消旧 task，避免资源冲突。
+    private var previousRecognitionTask: SFSpeechRecognitionTask?
 
     init(config: ASRConfig) {
         self.config = config
@@ -47,10 +51,20 @@ final class SystemSpeechASR: ASREngine {
         }
 
         let languageID = config.recognitionLanguageID
-        guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: languageID)),
-              recognizer.isAvailable else {
-            logger.warning("Recognizer for \(languageID) unavailable")
-            throw ASError.recognizerUnavailable
+        
+        // 复用或创建 recognizer：同一个 locale 的 recognizer 实例可复用，
+        // 避免短时间内连续 new 实例导致底层 task 资源冲突。
+        let recognizer: SFSpeechRecognizer
+        if let existing = sharedRecognizer, existing.locale.identifier == languageID {
+            recognizer = existing
+        } else {
+            guard let newRecognizer = SFSpeechRecognizer(locale: Locale(identifier: languageID)),
+                  newRecognizer.isAvailable else {
+                logger.warning("Recognizer for \(languageID) unavailable")
+                throw ASError.recognizerUnavailable
+            }
+            sharedRecognizer = newRecognizer
+            recognizer = newRecognizer
         }
 
         let text = await transcribe(url: url, with: recognizer, languageID: languageID)
@@ -66,7 +80,12 @@ final class SystemSpeechASR: ASREngine {
     /// 使用 hasResumed flag 防止 double-resume，并在回调未提供 final/error 时
     /// （如 recognizer 直接结束）也 resume，避免 Task 永久挂起。
     private func transcribe(url: URL, with recognizer: SFSpeechRecognizer, languageID: String) async -> String {
-        await withCheckedContinuation { continuation in
+        // 取消前一个可能还在运行的 task，避免资源冲突
+        if let previousTask = previousRecognitionTask {
+            previousTask.cancel()
+        }
+        
+        return await withCheckedContinuation { continuation in
             let request = SFSpeechURLRecognitionRequest(url: url)
             request.shouldReportPartialResults = false
             if #available(macOS 14.0, *) {
@@ -86,29 +105,34 @@ final class SystemSpeechASR: ASREngine {
                 }
             }
 
-            let task = recognizer.recognitionTask(with: request) { result, error in
+            let task = recognizer.recognitionTask(with: request) { [weak self] result, error in
                 if let error {
                     logger.warning("File recognition [\(languageID)] error: \(error.localizedDescription)")
+                    self?.previousRecognitionTask = nil
                     resumeOnce("")
                     return
                 }
                 if let result {
                     if result.isFinal {
                         let text = result.bestTranscription.formattedString
+                        self?.previousRecognitionTask = nil
                         resumeOnce(text)
                     }
                     // 非 final：忽略，等最终结果
                 } else {
                     // 无 result 无 error（recognizer 异常结束）：resume 空串避免挂起
+                    self?.previousRecognitionTask = nil
                     resumeOnce("")
                 }
             }
+            
+            self.previousRecognitionTask = task
 
             // 兜底：如果 recognizer 因系统限制（如 ~1 分钟单任务上限）迟迟不回调，
             // 30 秒后强制 resume，防止 Task 永久挂起。
-            DispatchQueue.global().asyncAfter(deadline: .now() + 30) {
+            DispatchQueue.global().asyncAfter(deadline: .now() + 30) { [weak self] in
                 resumeOnce("")
-                task.cancel()  // 取消任务（若仍在跑）
+                self?.previousRecognitionTask = nil
             }
         }
     }

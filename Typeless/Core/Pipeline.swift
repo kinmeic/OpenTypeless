@@ -132,6 +132,9 @@ final class Pipeline: ObservableObject {
         logger.info("Starting recording")
         lastError = nil
         lastTranscript = nil
+        // 重置上次语音时间戳：否则静音检测会沿用上一段录音的时间戳，
+        // 导致本次录音刚启动就被误判为“已静音超时”而提前停止（第二次录音失败的根因）。
+        lastVoiceTime = nil
 
         // 交互声音：开始
         if settings.playInteractionSound { soundFeedback.playStart() }
@@ -238,15 +241,8 @@ final class Pipeline: ObservableObject {
                 }
 
             case .assist:
-                // C：采集选中文本 + LLM 处理，结果以弹窗显示（不注入文本框）
+                // C：采集选中文本（可选）+ LLM 处理，结果以弹窗显示（不注入文本框）
                 let ctx = await context.collect()
-                guard ctx.isEmpty == false else {
-                    throw NSError(
-                        domain: "OpenTypeless",
-                        code: 2,
-                        userInfo: [NSLocalizedDescriptionKey: "No selected text detected. Select text in the target app and try Ask again."]
-                    )
-                }
                 let answer = try await assist(transcription: text, context: ctx)
                 ResultOverlay.shared.show(answer: answer)
             }

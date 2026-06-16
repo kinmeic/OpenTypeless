@@ -48,12 +48,19 @@ final class LLMClient {
     private let session = URLSession.shared
 
     /// 共享的语音转写加工提示词（A 键加工、B 键翻译前加工都复用）。
+    /// 关键约束：必须让 LLM 把输入当作"待整理的转写文字"而非"用户提问"，防止 LLM 回答语音内容中的问题。
     private static let refinePrompt = """
-    你是语音转写文字的整理助手。对下面的转写文字进行加工：\
-    1. 自动去除像“呃”、“嗯”等填充词。\
-    2. 去除讲话中不必要和重复的词汇，确保语言简洁易懂。\
-    3. 将口述的列表、步骤和要点整理成干净、结构化的文本，省去手动格式化的麻烦。\
-    保留原意，不添加未提及的信息。
+    你是语音转写后处理助手。你的唯一任务是对接收到的"语音转写文字"进行整理和格式化。
+
+    输入内容是一段语音识别转写出的文字，不是用户在向你提问。无论这段文字是什么内容（问题、陈述、命令等），你都不要回答、不要解释、不要添加任何新信息。
+
+    加工规则：
+    1. 自动去除像"呃"、"嗯"、"啊"等填充词和口头禅。
+    2. 去除讲话中不必要的重复词汇，确保语言简洁。
+    3. 将口述的列表、步骤和要点整理成干净、结构化的文本。
+    4. 修正明显的语音识别错误（如谐音错字），但保留原意。
+
+    输出要求：只返回加工后的文字本身，不要任何解释、不要前后缀、不要回答输入中的问题。
     """
 
     // MARK: - Refine (Text Model, A key 后处理)
@@ -67,7 +74,7 @@ final class LLMClient {
         }
 
         let provider = Provider(rawValue: config.textProvider) ?? .openai
-        let systemPrompt = Self.refinePrompt + "直接返回加工后的文字，不要任何解释或前后缀。"
+        let systemPrompt = Self.refinePrompt
 
         let messages: [[String: Any]] = [
             ["role": "system", "content": systemPrompt],
@@ -94,7 +101,7 @@ final class LLMClient {
         }
 
         let provider = Provider(rawValue: config.textProvider) ?? .openai
-        let systemPrompt = Self.refinePrompt + "\n另外，请将加工后的文字翻译成\(targetLanguage)。如果原文已经是\(targetLanguage)，则保持不变。直接返回加工并翻译后的最终结果，不要任何解释或前后缀。"
+        let systemPrompt = Self.refinePrompt + "\n另外，请将加工后的文字翻译成\(targetLanguage)。如果原文已经是\(targetLanguage)，则保持不变。只返回加工并翻译后的最终结果，不要任何解释或前后缀。"
 
         let messages: [[String: Any]] = [
             ["role": "system", "content": systemPrompt],
@@ -133,8 +140,10 @@ final class LLMClient {
         let provider = Provider(rawValue: providerRaw) ?? .openai
 
         let systemPrompt = """
-        You are a helpful assistant. The user spoke an instruction and selected text in the active app. \
-        Apply the spoken instruction only to the selected text. Respond in the same language the user spoke.
+        You are a helpful assistant. The user spoke an instruction. \
+        If there is selected text from the active app, apply the spoken instruction to that text. \
+        If there is no selected text, simply answer or execute the spoken instruction directly. \
+        Respond in the same language the user spoke.
         """
 
         var userContent = "Spoken instruction: \(transcription)"
