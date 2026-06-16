@@ -18,6 +18,7 @@ final class SystemSpeechASR: ASREngine {
         case notAuthorized
         case recognizerUnavailable
         case emptyResult
+        case recognitionTimedOut
 
         var errorDescription: String? {
             switch self {
@@ -27,6 +28,8 @@ final class SystemSpeechASR: ASREngine {
                 return "No speech recognizer is available for the configured language."
             case .emptyResult:
                 return "No speech text was recognized."
+            case .recognitionTimedOut:
+                return "Recording is too long for on-device recognition (system limit ~1 minute). Try a shorter clip."
             }
         }
     }
@@ -36,6 +39,8 @@ final class SystemSpeechASR: ASREngine {
     private var sharedRecognizer: SFSpeechRecognizer?
     /// 跟踪当前/上一个 recognition task，用于在启动新 task 前取消旧 task，避免资源冲突。
     private var previousRecognitionTask: SFSpeechRecognitionTask?
+    /// 超时哨兵值：正常转写不会产生该内容，用于区分"超时被截断"与"无识别结果"。
+    private static let timeoutSentinel = "\u{0}__OPENTYPELESS_ASR_TIMEOUT__"
 
     init(config: ASRConfig) {
         self.config = config
@@ -68,6 +73,11 @@ final class SystemSpeechASR: ASREngine {
         }
 
         let text = await transcribe(url: url, with: recognizer, languageID: languageID)
+
+        // 超时哨兵：recognizer 因系统单任务时长上限未给出结果，提示"录音过长"而非笼统的"无识别结果"
+        if text == Self.timeoutSentinel {
+            throw ASError.recognitionTimedOut
+        }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty == false else {
             throw ASError.emptyResult
@@ -130,9 +140,10 @@ final class SystemSpeechASR: ASREngine {
 
             // 兜底：如果 recognizer 因系统限制（如 ~1 分钟单任务上限）迟迟不回调，
             // 75 秒后强制取消并 resume，防止 Task 永久挂起，同时给系统 URL 识别约 1 分钟的任务上限留余量。
+            // 用哨兵值标记"超时"（区别于真正返回空串的"无识别结果"），上层据此抛更准确的错误。
             DispatchQueue.global().asyncAfter(deadline: .now() + 75) { [weak self] in
                 self?.previousRecognitionTask?.cancel()
-                resumeOnce("")
+                resumeOnce(Self.timeoutSentinel)
                 self?.previousRecognitionTask = nil
             }
         }

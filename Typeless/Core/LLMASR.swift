@@ -123,13 +123,27 @@ final class LLMASR: ASREngine {
         )
         request.httpBody = body
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await NetworkRetry.perform(
+            isRetryable: { error in
+                if NetworkRetry.isRetryableError(error) { return true }
+                if case ASError.requestFailed(let desc) = error,
+                   NetworkRetry.isRetryableHTTPStatus(in: desc) {
+                    return true
+                }
+                return false
+            },
+            operation: {
+                let (d, r) = try await self.session.data(for: request)
+                if let http = r as? HTTPURLResponse, (200..<300).contains(http.statusCode) == false {
+                    let bodyText = String(data: d, encoding: .utf8) ?? "(binary)"
+                    throw ASError.requestFailed("HTTP \(http.statusCode): \(String(bodyText.prefix(300)))")
+                }
+                return (d, r)
+            }
+        )
+
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ASError.invalidResponse
-        }
-        guard (200..<300).contains(httpResponse.statusCode) else {
-            let bodyText = String(data: data, encoding: .utf8) ?? "(binary)"
-            throw ASError.requestFailed("HTTP \(httpResponse.statusCode): \(String(bodyText.prefix(300)))")
         }
 
         // 响应格式：{"text": "..."}（OpenAI / GLM-ASR 兼容）
@@ -187,13 +201,27 @@ final class LLMASR: ASREngine {
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await NetworkRetry.perform(
+            isRetryable: { error in
+                if NetworkRetry.isRetryableError(error) { return true }
+                if case ASError.requestFailed(let desc) = error,
+                   NetworkRetry.isRetryableHTTPStatus(in: desc) {
+                    return true
+                }
+                return false
+            },
+            operation: {
+                let (d, r) = try await self.session.data(for: request)
+                if let http = r as? HTTPURLResponse, (200..<300).contains(http.statusCode) == false {
+                    let bodyText = String(data: d, encoding: .utf8) ?? "(binary)"
+                    throw ASError.requestFailed("HTTP \(http.statusCode): \(String(bodyText.prefix(300)))")
+                }
+                return (d, r)
+            }
+        )
+
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ASError.invalidResponse
-        }
-        guard (200..<300).contains(httpResponse.statusCode) else {
-            let bodyText = String(data: data, encoding: .utf8) ?? "(binary)"
-            throw ASError.requestFailed("HTTP \(httpResponse.statusCode): \(String(bodyText.prefix(300)))")
         }
 
         let text = try extractChatCompletionText(from: data)

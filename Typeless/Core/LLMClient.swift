@@ -15,6 +15,7 @@ private let logger = Logger(subsystem: "com.opentypeless.app", category: "llm")
 final class LLMClient {
     enum LLMError: LocalizedError {
         case notConfigured
+        case unknownProvider(String)
         case requestFailed(String)
         case invalidResponse
         case emptyContent
@@ -23,6 +24,8 @@ final class LLMClient {
             switch self {
             case .notConfigured:
                 return "LLM is not configured. Set API key in settings."
+            case .unknownProvider(let provider):
+                return "Unknown LLM provider: \"\(provider)\". Use OpenAI or Anthropic in settings."
             case .requestFailed(let message):
                 return "LLM request failed: \(message)"
             case .invalidResponse:
@@ -73,7 +76,7 @@ final class LLMClient {
             throw LLMError.notConfigured
         }
 
-        let provider = Provider(rawValue: config.textProvider) ?? .openai
+        let provider = try resolveProvider(config.textProvider)
         let systemPrompt = Self.refinePrompt
 
         let messages: [[String: Any]] = [
@@ -100,7 +103,7 @@ final class LLMClient {
             throw LLMError.notConfigured
         }
 
-        let provider = Provider(rawValue: config.textProvider) ?? .openai
+        let provider = try resolveProvider(config.textProvider)
         let systemPrompt = Self.refinePrompt + "\nAdditionally, translate the processed text into \(targetLanguage). If the original is already in \(targetLanguage), keep it unchanged. Return only the final processed and translated result, with no explanations or prefixes/suffixes."
 
         let messages: [[String: Any]] = [
@@ -137,7 +140,7 @@ final class LLMClient {
             throw LLMError.notConfigured
         }
 
-        let provider = Provider(rawValue: providerRaw) ?? .openai
+        let provider = try resolveProvider(providerRaw)
 
         let systemPrompt = """
         You are a helpful assistant. The user spoke an instruction. \
@@ -233,14 +236,28 @@ final class LLMClient {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
 
-        let (data, response) = try await session.data(for: request)
+        // 网络层与 HTTP 状态码层做重试（瞬时故障：断网/超时/5xx/408/429），响应解析错误不重试。
+        let (data, response) = try await NetworkRetry.perform(
+            isRetryable: { error in
+                if NetworkRetry.isRetryableError(error) { return true }
+                if case LLMError.requestFailed(let desc) = error,
+                   NetworkRetry.isRetryableHTTPStatus(in: desc) {
+                    return true
+                }
+                return false
+            },
+            operation: {
+                let (d, r) = try await self.session.data(for: request)
+                if let http = r as? HTTPURLResponse, (200..<300).contains(http.statusCode) == false {
+                    let bodyText = String(data: d, encoding: .utf8) ?? "(binary)"
+                    throw LLMError.requestFailed("HTTP \(http.statusCode): \(String(bodyText.prefix(300)))")
+                }
+                return (d, r)
+            }
+        )
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw LLMError.invalidResponse
-        }
-        guard (200..<300).contains(httpResponse.statusCode) else {
-            let bodyText = String(data: data, encoding: .utf8) ?? "(binary)"
-            throw LLMError.requestFailed("HTTP \(httpResponse.statusCode): \(String(bodyText.prefix(300)))")
         }
 
         // 解析响应（OpenAI 和 Anthropic 格式不同）
@@ -321,6 +338,20 @@ final class LLMClient {
     private func isLocalProvider(_ provider: String) -> Bool {
         let lower = provider.lowercased()
         return lower == "ollama" || lower == "lm-studio" || lower == "local"
+    }
+
+    /// 将配置中的 provider 字符串解析为 `Provider`。
+    /// - 已知 provider（openai/anthropic）直接返回；
+    /// - 本地 provider（ollama/lm-studio/local）走 OpenAI 兼容协议；
+    /// - 未知值抛 `unknownProvider`，避免静默 fallback 到 OpenAI 导致请求发到错误 endpoint 或泄露 API key。
+    private func resolveProvider(_ providerRaw: String) throws -> Provider {
+        if let provider = Provider(rawValue: providerRaw) {
+            return provider
+        }
+        if isLocalProvider(providerRaw) {
+            return .openai
+        }
+        throw LLMError.unknownProvider(providerRaw)
     }
 
     // MARK: - Test Connection (for settings UI)

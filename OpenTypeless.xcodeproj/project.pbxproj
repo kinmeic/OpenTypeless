@@ -14,6 +14,7 @@
 		1EED19230C4520C45560E443 /* AudioDeviceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DC8CE4D75FF0BE5B9548A70 /* AudioDeviceManager.swift */; };
 		2734900A7BD98B15318B65FD /* SettingsWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32E6512E3A97A058E7621BDF /* SettingsWindow.swift */; };
 		418D25378B9EA2B624225E77 /* Pipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = C31802BB7ECF77491D085913 /* Pipeline.swift */; };
+		438B23B48D8D160224D267A1 /* NetworkRetry.swift in Sources */ = {isa = PBXBuildFile; fileRef = C22E001FFB78A0FF7C8DC932 /* NetworkRetry.swift */; };
 		4D037CA09ADBBEABB6CA6320 /* PipelineStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 794B85DD976FECB92CFADF83 /* PipelineStateTests.swift */; };
 		5C044F9C81CC49722CE58FA4 /* KeyCodes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D90B3A5C8A45BC79D20C570 /* KeyCodes.swift */; };
 		6563B8AA58B8C126DA7E3F95 /* LLMASR.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4A5AD409D35B1EB5E1DCDFA /* LLMASR.swift */; };
@@ -76,6 +77,7 @@
 		B5C1C2C4D2BE2CF1E908BFA2 /* ASREngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ASREngine.swift; sourceTree = "<group>"; };
 		B71E06BDD413B070EF895E76 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		BC7746C7B4D46EBE4561D88D /* KeyboardMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardMonitor.swift; sourceTree = "<group>"; };
+		C22E001FFB78A0FF7C8DC932 /* NetworkRetry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkRetry.swift; sourceTree = "<group>"; };
 		C301C03899A9212649A9A293 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		C31802BB7ECF77491D085913 /* Pipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pipeline.swift; sourceTree = "<group>"; };
 		C6F3E7EB6A2DD806F710882C /* LLMClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMClient.swift; sourceTree = "<group>"; };
@@ -164,6 +166,7 @@
 			children = (
 				1D90B3A5C8A45BC79D20C570 /* KeyCodes.swift */,
 				8C3DDB72A3FED0ED22EE69FD /* Logger.swift */,
+				C22E001FFB78A0FF7C8DC932 /* NetworkRetry.swift */,
 			);
 			path = Support;
 			sourceTree = "<group>";
@@ -303,6 +306,7 @@
 				D98A3C4147198E950A37B532 /* LLMClient.swift in Sources */,
 				1367C77EC206DD24D9EB04A1 /* Logger.swift in Sources */,
 				6B1489772792A4615486A426 /* MenuBarMenu.swift in Sources */,
+				438B23B48D8D160224D267A1 /* NetworkRetry.swift in Sources */,
 				ED72F98AD2730539DB6B21DA /* NotificationManager.swift in Sources */,
 				7B7304E7D358DDF3B3DCE14B /* Permissions.swift in Sources */,
 				418D25378B9EA2B624225E77 /* Pipeline.swift in Sources */,
