@@ -79,15 +79,15 @@ final class Pipeline: ObservableObject {
             let action = self.action(from: event)
             self.handleShortcut(action: action)
         }
-        // 监听应用退出，确保静音/录音资源被恢复和释放
+        // 监听应用退出，确保静音/录音资源被恢复和释放。
+        // 闭包已在 main queue 上同步执行，stop() 是 @MainActor 方法可直接调用；
+        // 不要用 Task 异步调度——willTerminate 后 RunLoop 不保证 drain，stop() 可能来不及执行。
         terminateObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
-                self?.stop()
-            }
+            self?.stop()
         }
     }
 

@@ -79,13 +79,15 @@ final class Permissions: ObservableObject {
         permissionRefreshBurstTimer?.invalidate()
         permissionRefreshBurstTicks = 0
 
-        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+        // 应用激活时短促轮询权限变化：10 次 × 1s，足以捕捉用户在系统设置中切换授权，
+        // 且不会像 60×0.5s 那样持续触发 AXIsProcessTrusted 等系统调用。
+        let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
                 self.refreshPermissionStatuses()
                 self.permissionRefreshBurstTicks += 1
 
-                if self.permissionRefreshBurstTicks >= 60 {
+                if self.permissionRefreshBurstTicks >= 10 {
                     self.permissionRefreshBurstTimer?.invalidate()
                     self.permissionRefreshBurstTimer = nil
                 }

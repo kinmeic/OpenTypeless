@@ -25,7 +25,6 @@
 		8A081564B87B18EA7D68DF06 /* RecordingOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63BA4EF14091505C34B81224 /* RecordingOverlay.swift */; };
 		8DBD23F49C12BBC5A25205AF /* ResultOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2377CF042E4FB20FEE7AC9B /* ResultOverlay.swift */; };
 		9C9D233AC34A7118CFD060BB /* ShortcutDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE53085B6A15269AD419D451 /* ShortcutDetectorTests.swift */; };
-		A538168057AED46A92B1E0A4 /* Events.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D06BD656E7E600A5ACC404A /* Events.swift */; };
 		AA118376B4363A6007FF71B0 /* HALAudioInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3B7DC43E5F0216DA871BE6E /* HALAudioInput.swift */; };
 		AF52B116DB0B5DD0AE7A211C /* SystemSpeechASR.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DD0CFFF8CD4196EE3F1EB74 /* SystemSpeechASR.swift */; };
 		B2E95994F3A003515A3E3DDC /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 54FDFB3CD1AA32D66E0AB1D9 /* Assets.xcassets */; };
@@ -73,7 +72,6 @@
 		8C3DDB72A3FED0ED22EE69FD /* Logger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logger.swift; sourceTree = "<group>"; };
 		8DD0CFFF8CD4196EE3F1EB74 /* SystemSpeechASR.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemSpeechASR.swift; sourceTree = "<group>"; };
 		9BB9445CB9C29A35751D99BA /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
-		9D06BD656E7E600A5ACC404A /* Events.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Events.swift; sourceTree = "<group>"; };
 		B2377CF042E4FB20FEE7AC9B /* ResultOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResultOverlay.swift; sourceTree = "<group>"; };
 		B5C1C2C4D2BE2CF1E908BFA2 /* ASREngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ASREngine.swift; sourceTree = "<group>"; };
 		B71E06BDD413B070EF895E76 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
@@ -170,14 +168,6 @@
 			path = Support;
 			sourceTree = "<group>";
 		};
-		A28240703F814666A4A1A304 /* Models */ = {
-			isa = PBXGroup;
-			children = (
-				9D06BD656E7E600A5ACC404A /* Events.swift */,
-			);
-			path = Models;
-			sourceTree = "<group>";
-		};
 		AA89EE38CD1471C6DF1DB7B3 /* Views */ = {
 			isa = PBXGroup;
 			children = (
@@ -195,7 +185,6 @@
 				54FDFB3CD1AA32D66E0AB1D9 /* Assets.xcassets */,
 				030FE297B2B6011130DB94C1 /* App */,
 				6054A9A581A0B0DB635E92AE /* Core */,
-				A28240703F814666A4A1A304 /* Models */,
 				4BE921C2E0185484410E0641 /* Resources */,
 				6D2DD2F48B53A8B52AE7E286 /* Support */,
 				17FAAA4332922776D3386C5C /* SupportingFiles */,
@@ -307,7 +296,6 @@
 				FA270A529901BAC510F22302 /* AudioLevelMonitor.swift in Sources */,
 				0F218B6BBF23E38BB54D1424 /* AudioRecorder.swift in Sources */,
 				BC74F8746E175CD7328CA85C /* ContextCollector.swift in Sources */,
-				A538168057AED46A92B1E0A4 /* Events.swift in Sources */,
 				AA118376B4363A6007FF71B0 /* HALAudioInput.swift in Sources */,
 				5C044F9C81CC49722CE58FA4 /* KeyCodes.swift in Sources */,
 				FC0ED4EB67ED6FF4D0914B4C /* KeyboardMonitor.swift in Sources */,
