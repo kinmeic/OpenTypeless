@@ -1,7 +1,7 @@
 import Foundation
 import os.log
 
-private let logger = Logger(subsystem: "com.typeless.app", category: "settings")
+private let logger = Logger(subsystem: "com.opentypeless.app", category: "settings")
 
 // MARK: - Configuration Models
 

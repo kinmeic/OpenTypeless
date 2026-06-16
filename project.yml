@@ -1,4 +1,4 @@
-name: Typeless
+name: OpenTypeless
 targets:
   Typeless:
     type: application
@@ -8,7 +8,8 @@ targets:
       - Typeless
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.typeless.app
+        PRODUCT_NAME: OpenTypeless
+        PRODUCT_BUNDLE_IDENTIFIER: com.opentypeless.app
         INFOPLIST_FILE: Typeless/SupportingFiles/Info.plist
         CODE_SIGN_ENTITLEMENTS: Typeless/SupportingFiles/Typeless.entitlements
         SWIFT_VERSION: "5.9"
@@ -19,8 +20,8 @@ targets:
       path: Typeless/SupportingFiles/Info.plist
       properties:
         LSUIElement: true
-        NSMicrophoneUsageDescription: "Typeless needs microphone access to record your voice for speech-to-text."
-        NSSpeechRecognitionUsageDescription: "Typeless needs speech recognition access to convert your voice into text."
+        NSMicrophoneUsageDescription: "OpenTypeless needs microphone access to record your voice for speech-to-text."
+        NSSpeechRecognitionUsageDescription: "OpenTypeless needs speech recognition access to convert your voice into text."
         NSUserNotificationAlertStyle: alert
     testTargets:
       - TypelessTests

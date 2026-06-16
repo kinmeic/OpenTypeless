@@ -4,7 +4,7 @@ import CoreAudio
 import Combine
 import os.log
 
-private let logger = Logger(subsystem: "com.typeless.app", category: "audio-level")
+private let logger = Logger(subsystem: "com.opentypeless.app", category: "audio-level")
 
 /// 轻量电平监测器：只采集音频电平用于 UI 反馈，不录音、不落盘。
 ///

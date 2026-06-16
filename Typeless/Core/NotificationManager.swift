@@ -2,7 +2,7 @@ import Foundation
 import UserNotifications
 import os.log
 
-private let logger = Logger(subsystem: "com.typeless.app", category: "notifications")
+private let logger = Logger(subsystem: "com.opentypeless.app", category: "notifications")
 
 /// 管理本地通知的显示，用于向用户报告 Pipeline 错误。
 @MainActor
@@ -37,7 +37,7 @@ final class NotificationManager: ObservableObject {
         content.sound = .default
 
         let request = UNNotificationRequest(
-            identifier: "typeless-error-\(Date().timeIntervalSince1970)",
+            identifier: "opentypeless-error-\(Date().timeIntervalSince1970)",
             content: content,
             trigger: nil // 立即显示
         )

@@ -3,7 +3,7 @@ import CoreAudio
 import AppKit
 import os.log
 
-private let logger = Logger(subsystem: "com.typeless.app", category: "pipeline")
+private let logger = Logger(subsystem: "com.opentypeless.app", category: "pipeline")
 
 // MARK: - Pipeline State Machine
 
@@ -36,7 +36,7 @@ final class Pipeline: ObservableObject {
     @Published private(set) var lastError: String? {
         didSet {
             if let error = lastError {
-                NotificationManager.shared.showError(title: "Typeless Error", message: error)
+                NotificationManager.shared.showError(title: "OpenTypeless Error", message: error)
             }
         }
     }
@@ -201,7 +201,7 @@ final class Pipeline: ObservableObject {
             if let url = recordingFileURL {
                 text = try await asr.transcribeFile(url)
             } else {
-                throw NSError(domain: "Typeless", code: 1,
+                throw NSError(domain: "OpenTypeless", code: 1,
                               userInfo: [NSLocalizedDescriptionKey: "No recording file to transcribe."])
             }
             lastTranscript = text
@@ -242,7 +242,7 @@ final class Pipeline: ObservableObject {
                 let ctx = await context.collect()
                 guard ctx.isEmpty == false else {
                     throw NSError(
-                        domain: "Typeless",
+                        domain: "OpenTypeless",
                         code: 2,
                         userInfo: [NSLocalizedDescriptionKey: "No selected text detected. Select text in the target app and try Ask again."]
                     )
@@ -261,7 +261,7 @@ final class Pipeline: ObservableObject {
     /// 生成临时录音文件 URL（m4a）。
     private func makeRecordingFileURL() -> URL {
         let dir = FileManager.default.temporaryDirectory
-        return dir.appendingPathComponent("typeless-\(UUID().uuidString).m4a")
+        return dir.appendingPathComponent("opentypeless-\(UUID().uuidString).m4a")
     }
 
     /// 删除临时录音文件并清空引用。

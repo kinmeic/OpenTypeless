@@ -2,7 +2,7 @@ import Foundation
 import CoreAudio
 import os.log
 
-private let logger = Logger(subsystem: "com.typeless.app", category: "audio-muter")
+private let logger = Logger(subsystem: "com.opentypeless.app", category: "audio-muter")
 
 /// 系统输出静音器：录音期间把系统默认输出设备静音，停止后恢复原状态。
 ///

@@ -3,7 +3,7 @@ import AppKit
 import SwiftUI
 import os.log
 
-private let logger = Logger(subsystem: "com.typeless.app", category: "result-overlay")
+private let logger = Logger(subsystem: "com.opentypeless.app", category: "result-overlay")
 
 /// 结果浮层管理：用 NSPanel 显示 LLM（C 键）的答案，居中显示，不抢主焦点但可交互（选择/复制）。
 ///
@@ -27,7 +27,7 @@ final class ResultOverlay {
             backing: .buffered,
             defer: false
         )
-        panel.title = "Typeless Assistant"
+        panel.title = "OpenTypeless Assistant"
         panel.isFloatingPanel = true
         panel.becomesKeyOnlyIfNeeded = true
         panel.level = .floating

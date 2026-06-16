@@ -4,7 +4,7 @@ import CoreAudio
 import AudioUnit
 import os.log
 
-private let logger = Logger(subsystem: "com.typeless.app", category: "hal-audio")
+private let logger = Logger(subsystem: "com.opentypeless.app", category: "hal-audio")
 
 /// HAL AudioUnit 采集器：直接用 Core Audio 的 HALOutput AudioUnit 采集指定输入设备。
 ///
@@ -104,7 +104,7 @@ final class HALAudioInput {
     var onBuffer: ((AVAudioPCMBuffer) -> Void)?
 
     /// 消费者队列：实时线程只入队索引，这里取数据包成 AVAudioPCMBuffer。
-    private let dispatchQueue = DispatchQueue(label: "Typeless.HALAudioInput.dispatch", qos: .userInitiated)
+    private let dispatchQueue = DispatchQueue(label: "OpenTypeless.HALAudioInput.dispatch", qos: .userInitiated)
     /// stop() 同步屏障队列：保证停止时无回调在跑。
     private let stopBarrier = DispatchSemaphore(value: 1)
 

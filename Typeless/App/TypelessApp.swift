@@ -22,7 +22,7 @@ struct TypelessApp: App {
         }
         .menuBarExtraStyle(.menu)
 
-        Window("Typeless Settings", id: "settings") {
+        Window("OpenTypeless Settings", id: "settings") {
             SettingsWindow()
                 .environmentObject(appSettings)
                 .environmentObject(permissions)

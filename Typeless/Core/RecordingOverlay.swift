@@ -3,7 +3,7 @@ import AppKit
 import SwiftUI
 import os.log
 
-private let logger = Logger(subsystem: "com.typeless.app", category: "overlay")
+private let logger = Logger(subsystem: "com.opentypeless.app", category: "overlay")
 
 /// 录音浮层管理：用一个 NSPanel（floating、non-activating）在屏幕底部居中显示录音状态。
 ///

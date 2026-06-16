@@ -3,7 +3,7 @@ import AVFAudio
 import CoreAudio
 import os.log
 
-private let logger = Logger(subsystem: "com.typeless.app", category: "audio")
+private let logger = Logger(subsystem: "com.opentypeless.app", category: "audio")
 
 /// 音频采集器（非实时模式）：录完整段音频并落盘 m4a。
 ///
@@ -28,7 +28,7 @@ final class AudioRecorder {
 
     /// 串行队列：保护 outputFile / pendingOutputURL / onLevel 等共享状态，
     /// 避免 buffer 回调线程与 start()/stop() 调用线程的数据竞争。
-    private let stateQueue = DispatchQueue(label: "Typeless.AudioRecorder.state")
+    private let stateQueue = DispatchQueue(label: "OpenTypeless.AudioRecorder.state")
 
     private var onLevel: ((Double) -> Void)?
     private var outputFile: AVAudioFile?

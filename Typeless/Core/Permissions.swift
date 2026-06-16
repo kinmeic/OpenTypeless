@@ -7,7 +7,7 @@ import Speech
 import CoreAudio
 import os.log
 
-private let logger = Logger(subsystem: "com.typeless.app", category: "permissions")
+private let logger = Logger(subsystem: "com.opentypeless.app", category: "permissions")
 
 // MARK: - Audio Device Info
 

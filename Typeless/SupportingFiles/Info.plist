@@ -21,9 +21,9 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Typeless needs microphone access to record your voice for speech-to-text.</string>
+	<string>OpenTypeless needs microphone access to record your voice for speech-to-text.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Typeless needs speech recognition access to convert your voice into text.</string>
+	<string>OpenTypeless needs speech recognition access to convert your voice into text.</string>
 	<key>NSUserNotificationAlertStyle</key>
 	<string>alert</string>
 </dict>

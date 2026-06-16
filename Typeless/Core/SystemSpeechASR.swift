@@ -3,7 +3,7 @@ import AVFAudio
 import Speech
 import os.log
 
-private let logger = Logger(subsystem: "com.typeless.app", category: "asr-system")
+private let logger = Logger(subsystem: "com.opentypeless.app", category: "asr-system")
 
 /// 系统语音识别引擎（非实时 batch 模式）。
 ///

@@ -23,7 +23,7 @@ struct MenuBarMenu: View {
 
         Divider()
 
-        Button("Quit Typeless") { NSApp.terminate(nil) }
+        Button("Quit OpenTypeless") { NSApp.terminate(nil) }
             .keyboardShortcut("q", modifiers: .command)
     }
 

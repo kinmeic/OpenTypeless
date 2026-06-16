@@ -3,7 +3,7 @@ import CoreAudio
 import AudioUnit
 import os.log
 
-private let logger = Logger(subsystem: "com.typeless.app", category: "audio-device")
+private let logger = Logger(subsystem: "com.opentypeless.app", category: "audio-device")
 
 /// 音频输入设备管理：枚举系统音频输入设备，并把指定设备设置到 AVAudioEngine。
 ///

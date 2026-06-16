@@ -1,7 +1,7 @@
 import Foundation
 import os.log
 
-private let logger = Logger(subsystem: "com.typeless.app", category: "llm")
+private let logger = Logger(subsystem: "com.opentypeless.app", category: "llm")
 
 /// LLM 客户端：移植 PTerminal ai/client.rs 的双协议抽象，支持 OpenAI / Anthropic。
 ///

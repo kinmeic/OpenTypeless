@@ -1,7 +1,7 @@
 import Foundation
 import os.log
 
-private let logger = Logger(subsystem: "com.typeless.app", category: "asr-llm")
+private let logger = Logger(subsystem: "com.opentypeless.app", category: "asr-llm")
 
 /// LLM 语音转文字引擎。
 ///
@@ -54,7 +54,7 @@ final class LLMASR: ASREngine {
         logger.info("LLMASR request: provider=\(providerRaw) model=\(model) file=\(url.lastPathComponent)")
 
         // multipart/form-data 上传音频文件
-        let boundary = "Typeless-\(UUID().uuidString)"
+        let boundary = "OpenTypeless-\(UUID().uuidString)"
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")

@@ -2,7 +2,7 @@ import Foundation
 import ApplicationServices
 import os.log
 
-private let logger = Logger(subsystem: "com.typeless.app", category: "context")
+private let logger = Logger(subsystem: "com.opentypeless.app", category: "context")
 
 /// C 流程的上下文采集：只读取当前焦点上下文中的选中文本。
 ///

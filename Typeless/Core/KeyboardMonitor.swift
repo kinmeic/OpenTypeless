@@ -3,7 +3,7 @@ import Foundation
 import CoreGraphics
 import os.log
 
-private let logger = Logger(subsystem: "com.typeless.app", category: "keyboard")
+private let logger = Logger(subsystem: "com.opentypeless.app", category: "keyboard")
 
 // MARK: - Shortcut Event
 

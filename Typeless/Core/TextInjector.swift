@@ -4,7 +4,7 @@ import AppKit
 import CoreGraphics
 import os.log
 
-private let logger = Logger(subsystem: "com.typeless.app", category: "injector")
+private let logger = Logger(subsystem: "com.opentypeless.app", category: "injector")
 
 /// 把文字注入到当前焦点文本框。
 ///

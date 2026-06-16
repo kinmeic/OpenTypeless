@@ -7,7 +7,7 @@ struct AppLogger {
     private let logger: Logger
 
     init(category: String) {
-        self.logger = Logger(subsystem: "com.typeless.app", category: category)
+        self.logger = Logger(subsystem: "com.opentypeless.app", category: category)
     }
 
     func info(_ message: String) {
