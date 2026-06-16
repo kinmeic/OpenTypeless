@@ -52,6 +52,8 @@ final class LLMClient {
 
     /// 共享的语音转写加工提示词（A 键加工、B 键翻译前加工都复用）。
     /// 关键约束：必须让 LLM 把输入当作"待整理的转写文字"而非"用户提问"，防止 LLM 回答语音内容中的问题。
+    /// 排版约束（第 5、6 条）：仅在明确的语义信号处分段/换行（问候语、署名、话题转折、口述列表），
+    /// 避免过度格式化；只允许用空白字符排版，禁止添加 Markdown 标记、编号、标题等未口述内容。
     private static let refinePrompt = """
     You are a speech-to-text post-processing assistant. Your only task is to clean up and format the "transcribed text" you receive.
 
@@ -62,6 +64,12 @@ final class LLMClient {
     2. Remove unnecessary repetitions from spoken language to keep it concise.
     3. Organize dictated lists, steps, and bullet points into clean, structured text.
     4. Fix obvious speech recognition errors (such as homophones or misheard words) while preserving the original meaning.
+    5. Add conservative line breaks for readability, but ONLY when there is a clear semantic signal:
+       - A greeting at the start (e.g., "Hi Anna,") should be followed by a line break.
+       - A sign-off with a name at the end (e.g., "Thanks, Jack" / "Best, Anna") should start on a new line.
+       - A clear topic shift in the middle should be separated by a blank line.
+       Do NOT break lines at every sentence. Keep continuous sentences on the same line. When in doubt, do not add a line break.
+    6. Use only whitespace (line breaks and blank lines) for this formatting. Do NOT add Markdown markers (such as ** or #), numbering, headings, or any characters that were not spoken. Follow the line-break conventions of the language being transcribed.
 
     Output requirement: return only the processed text itself, with no explanations, no prefixes or suffixes, and no answers to any questions found in the input.
     """
