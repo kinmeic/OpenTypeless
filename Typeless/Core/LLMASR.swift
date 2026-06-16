@@ -58,7 +58,7 @@ final class LLMASR: ASREngine {
 
     // MARK: - Provider Routing
 
-    private enum RequestMode {
+    enum RequestMode {
         case openAITranscriptions
         case aliyunQwenChatCompletions
     }
@@ -81,7 +81,7 @@ final class LLMASR: ASREngine {
         )
     }
 
-    private func requestMode(provider providerRaw: String, baseUrl: String, model: String) throws -> RequestMode {
+    func requestMode(provider providerRaw: String, baseUrl: String, model: String) throws -> RequestMode {
         let provider = providerRaw.lowercased()
         let model = model.lowercased()
         let baseUrl = baseUrl.lowercased()
@@ -236,7 +236,7 @@ final class LLMASR: ASREngine {
     // MARK: - Helpers
 
     /// 拼接 base URL + /audio/transcriptions，容忍 base 含 /v1。
-    private func makeTranscriptionURL(base: String) throws -> URL {
+    func makeTranscriptionURL(base: String) throws -> URL {
         var trimmed = base.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         if trimmed.hasSuffix("/v1") {
@@ -249,7 +249,7 @@ final class LLMASR: ASREngine {
     }
 
     /// 拼接阿里 OpenAI-compatible chat completions URL，容忍 base 含 /v1 或完整 endpoint。
-    private func makeAliyunChatCompletionsURL(base: String) throws -> URL {
+    func makeAliyunChatCompletionsURL(base: String) throws -> URL {
         let trimmed = base.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let endpoint: String
@@ -337,7 +337,7 @@ final class LLMASR: ASREngine {
         return body
     }
 
-    private func mimeType(for filename: String) -> String {
+    func mimeType(for filename: String) -> String {
         let ext = (filename as NSString).pathExtension.lowercased()
         switch ext {
         case "m4a": return "audio/mp4"

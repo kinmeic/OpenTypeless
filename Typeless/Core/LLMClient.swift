@@ -297,7 +297,7 @@ final class LLMClient {
 
     /// 移除大模型输出中的 <think>...</think> 思考过程标签。
     /// 处理：成对标签（含多行）、未闭合的开标签（到文末）。
-    private static func stripThinkTags(_ text: String) -> String {
+    static func stripThinkTags(_ text: String) -> String {
         var result = text
         // 成对的 <think>...</think>（DOTALL：跨行匹配），非贪婪
         if let regex = try? NSRegularExpression(pattern: "<think>.*?</think>", options: [.dotMatchesLineSeparators]) {
@@ -322,7 +322,7 @@ final class LLMClient {
 
     /// 拼接 base URL 和 API path，容忍 base 含 /v1。
     /// 参照 PTerminal join_api_url：strip trailing /v1 避免重复。
-    private func joinApiUrl(base: String, path: String) throws -> URL {
+    func joinApiUrl(base: String, path: String) throws -> URL {
         var trimmed = base.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         if trimmed.hasSuffix("/v1") {
@@ -335,7 +335,7 @@ final class LLMClient {
     }
 
     /// 判断是否本地 provider（Ollama / LM Studio），这类不需要 API key。
-    private func isLocalProvider(_ provider: String) -> Bool {
+    func isLocalProvider(_ provider: String) -> Bool {
         let lower = provider.lowercased()
         return lower == "ollama" || lower == "lm-studio" || lower == "local"
     }
@@ -344,7 +344,7 @@ final class LLMClient {
     /// - 已知 provider（openai/anthropic）直接返回；
     /// - 本地 provider（ollama/lm-studio/local）走 OpenAI 兼容协议；
     /// - 未知值抛 `unknownProvider`，避免静默 fallback 到 OpenAI 导致请求发到错误 endpoint 或泄露 API key。
-    private func resolveProvider(_ providerRaw: String) throws -> Provider {
+    func resolveProvider(_ providerRaw: String) throws -> Provider {
         if let provider = Provider(rawValue: providerRaw) {
             return provider
         }
@@ -399,7 +399,7 @@ final class LLMClient {
         }
     }
 
-    private func validateASRSettings(providerRaw: String, apiKey: String, model: String, baseUrl: String) -> TestResult {
+    func validateASRSettings(providerRaw: String, apiKey: String, model: String, baseUrl: String) -> TestResult {
         let provider = providerRaw.lowercased()
         let model = model.trimmingCharacters(in: .whitespacesAndNewlines)
         let baseUrl = baseUrl.trimmingCharacters(in: .whitespacesAndNewlines)
