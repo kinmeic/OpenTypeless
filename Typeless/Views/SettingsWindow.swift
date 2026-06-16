@@ -45,16 +45,27 @@ struct SettingsGeneralTab: View {
 
     var body: some View {
         Form {
+            Section("Language") {
+                Picker("Display Language", selection: $appSettings.language) {
+                    Text("English").tag("en")
+                }
+                Text("Changes take effect after restarting the app.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
             Section("Permissions") {
                 PermissionRow(
                     label: "Accessibility",
                     granted: permissions.accessibilityGranted,
-                    action: permissions.requestAccessibility
+                    action: permissions.requestAccessibility,
+                    helpText: "If it doesn't work, first remove the old entry via the minus button on the authorization page, then re-add this app via the plus button at the bottom."
                 )
                 PermissionRow(
                     label: "Input Monitoring",
                     granted: permissions.inputMonitoringGranted,
-                    action: permissions.requestInputMonitoring
+                    action: permissions.requestInputMonitoring,
+                    helpText: "If it doesn't work, first remove the old entry via the minus button on the authorization page, then re-add this app via the plus button at the bottom. (If the app is already running, a restart is required for changes to take effect.)"
                 )
                 PermissionRow(
                     label: "Microphone",
@@ -165,13 +176,20 @@ struct SettingsGeneralTab: View {
 }
 
 struct PermissionRow: View {
-    let label: String
+    let label: LocalizedStringKey
     let granted: Bool
     let action: () -> Void
+    var helpText: LocalizedStringKey? = nil
 
     var body: some View {
         HStack {
             Text(label)
+            if let helpText {
+                Image(systemName: "info.circle")
+                    .imageScale(.small)
+                    .foregroundColor(.secondary)
+                    .help(helpText)
+            }
             Spacer()
             Image(systemName: granted ? "checkmark.circle.fill" : "xmark.circle.fill")
                 .foregroundColor(granted ? .green : .red)
@@ -317,7 +335,7 @@ struct SettingsASRTab: View {
             }
 
             Section("Translation") {
-                Picker("Target Language (for B key)", selection: $appSettings.targetLanguage) {
+                Picker("Target Language", selection: $appSettings.targetLanguage) {
                     Text("英语").tag("English")
                     Text("中文").tag("Chinese")
                     Text("日语").tag("Japanese")

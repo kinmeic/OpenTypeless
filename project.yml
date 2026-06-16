@@ -1,4 +1,6 @@
 name: OpenTypeless
+options:
+  developmentLanguage: en
 schemes:
   OpenTypeless:
     build:

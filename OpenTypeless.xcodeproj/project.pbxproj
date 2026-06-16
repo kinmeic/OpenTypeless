@@ -10,6 +10,7 @@
 		0BEE10986418F2DCCC125AC9 /* TextInjector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D73E8B6BBCE4A8657D54D46 /* TextInjector.swift */; };
 		0F218B6BBF23E38BB54D1424 /* AudioRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31706359FD9D7D94E209D0B6 /* AudioRecorder.swift */; };
 		1367C77EC206DD24D9EB04A1 /* Logger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C3DDB72A3FED0ED22EE69FD /* Logger.swift */; };
+		1769F6CECC8817D230E337CC /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 44B95ED4D869973222031A59 /* Localizable.xcstrings */; };
 		1EED19230C4520C45560E443 /* AudioDeviceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DC8CE4D75FF0BE5B9548A70 /* AudioDeviceManager.swift */; };
 		2734900A7BD98B15318B65FD /* SettingsWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32E6512E3A97A058E7621BDF /* SettingsWindow.swift */; };
 		418D25378B9EA2B624225E77 /* Pipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = C31802BB7ECF77491D085913 /* Pipeline.swift */; };
@@ -60,6 +61,7 @@
 		346BCEE5B5241E3998FF656F /* Permissions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Permissions.swift; sourceTree = "<group>"; };
 		3F43702E854275896E2AF9C4 /* SystemAudioMuter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemAudioMuter.swift; sourceTree = "<group>"; };
 		42DC825FFC68E7F2D78C8E43 /* RecordingOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingOverlayView.swift; sourceTree = "<group>"; };
+		44B95ED4D869973222031A59 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		4CEC1FED805E8B560C3A5BD9 /* Typeless.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Typeless.entitlements; sourceTree = "<group>"; };
 		52F3C1CE90B96F521693DA49 /* TypelessTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TypelessTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		54FDFB3CD1AA32D66E0AB1D9 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -79,7 +81,7 @@
 		C301C03899A9212649A9A293 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		C31802BB7ECF77491D085913 /* Pipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pipeline.swift; sourceTree = "<group>"; };
 		C6F3E7EB6A2DD806F710882C /* LLMClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMClient.swift; sourceTree = "<group>"; };
-		C72FD78656798B9757A83977 /* OpenTypeless.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OpenTypeless.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C72FD78656798B9757A83977 /* Typeless.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Typeless.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD30DA128D88EB138D1D0969 /* NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManager.swift; sourceTree = "<group>"; };
 		CF11640B8F518E5D914F2C2F /* MenuBarMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarMenu.swift; sourceTree = "<group>"; };
 		D0EF5BDC0B77E6064D588323 /* SoundFeedback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoundFeedback.swift; sourceTree = "<group>"; };
@@ -115,6 +117,14 @@
 				DE53085B6A15269AD419D451 /* ShortcutDetectorTests.swift */,
 			);
 			path = TypelessTests;
+			sourceTree = "<group>";
+		};
+		4BE921C2E0185484410E0641 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				44B95ED4D869973222031A59 /* Localizable.xcstrings */,
+			);
+			path = Resources;
 			sourceTree = "<group>";
 		};
 		4F219BC675784540A105291E = {
@@ -186,6 +196,7 @@
 				030FE297B2B6011130DB94C1 /* App */,
 				6054A9A581A0B0DB635E92AE /* Core */,
 				A28240703F814666A4A1A304 /* Models */,
+				4BE921C2E0185484410E0641 /* Resources */,
 				6D2DD2F48B53A8B52AE7E286 /* Support */,
 				17FAAA4332922776D3386C5C /* SupportingFiles */,
 				AA89EE38CD1471C6DF1DB7B3 /* Views */,
@@ -196,7 +207,7 @@
 		E9C04359331FACD7E4739CE9 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				C72FD78656798B9757A83977 /* OpenTypeless.app */,
+				C72FD78656798B9757A83977 /* Typeless.app */,
 				52F3C1CE90B96F521693DA49 /* TypelessTests.xctest */,
 			);
 			name = Products;
@@ -238,7 +249,7 @@
 			packageProductDependencies = (
 			);
 			productName = Typeless;
-			productReference = C72FD78656798B9757A83977 /* OpenTypeless.app */;
+			productReference = C72FD78656798B9757A83977 /* Typeless.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -278,6 +289,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B2E95994F3A003515A3E3DDC /* Assets.xcassets in Resources */,
+				1769F6CECC8817D230E337CC /* Localizable.xcstrings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

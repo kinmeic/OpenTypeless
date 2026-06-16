@@ -82,6 +82,11 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(enableSystemNotifications, forKey: "enableSystemNotifications") }
     }
 
+    /// 界面显示语言（如 "en"）。目前仅支持英语；切换后需重启 app 生效。
+    @Published var language: String {
+        didSet { UserDefaults.standard.set(language, forKey: "language") }
+    }
+
     // MARK: - Init
 
     private init() {
@@ -109,6 +114,7 @@ final class AppSettings: ObservableObject {
         self.muteSystemAudioDuringRecording = UserDefaults.standard.object(forKey: "muteSystemAudioDuringRecording") as? Bool ?? false
         self.playInteractionSound = UserDefaults.standard.object(forKey: "playInteractionSound") as? Bool ?? true
         self.enableSystemNotifications = UserDefaults.standard.object(forKey: "enableSystemNotifications") as? Bool ?? true
+        self.language = UserDefaults.standard.string(forKey: "language") ?? "en"
         logger.info("Settings loaded")
     }
 
