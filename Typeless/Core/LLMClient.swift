@@ -264,10 +264,6 @@ final class LLMClient {
             }
         )
 
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw LLMError.invalidResponse
-        }
-
         // 解析响应（OpenAI 和 Anthropic 格式不同）
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw LLMError.invalidResponse

@@ -142,10 +142,6 @@ final class LLMASR: ASREngine {
             }
         )
 
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw ASError.invalidResponse
-        }
-
         // 响应格式：{"text": "..."}（OpenAI / GLM-ASR 兼容）
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let text = json["text"] as? String else {
@@ -219,10 +215,6 @@ final class LLMASR: ASREngine {
                 return (d, r)
             }
         )
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw ASError.invalidResponse
-        }
 
         let text = try extractChatCompletionText(from: data)
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
