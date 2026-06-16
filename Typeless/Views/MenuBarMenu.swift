@@ -31,9 +31,10 @@ struct MenuBarMenu: View {
 
     @ViewBuilder
     private var statusSection: some View {
-        let (statusText, icon, color) = statusInfo
-        Label(statusText, systemImage: icon)
-            .foregroundColor(color)
+        if let (statusText, icon, color) = statusInfo {
+            Label(statusText, systemImage: icon)
+                .foregroundColor(color)
+        }
 
         if let error = pipeline.lastError {
             HStack {
@@ -55,10 +56,11 @@ struct MenuBarMenu: View {
         }
     }
 
-    private var statusInfo: (String, String, Color) {
+    /// 仅在录音 / 处理中时返回状态文案；idle 时不显示。
+    private var statusInfo: (String, String, Color)? {
         switch pipeline.phase {
         case .idle:
-            return ("Ready to record", "mic.fill", .secondary)
+            return nil
         case .recording:
             return ("Recording... (press shortcut to stop)", "mic.circle.fill", .red)
         case .processing(let action):

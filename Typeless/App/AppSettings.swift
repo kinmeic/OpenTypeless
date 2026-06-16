@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import os.log
 
@@ -10,14 +11,6 @@ struct LLMConfig: Codable, Equatable {
     var textApiKey: String = ""
     var textModel: String = "gpt-4o-mini"
     var textBaseUrl: String = "https://api.openai.com"
-
-    var visionProvider: String = "same"
-    var visionApiKey: String = ""
-    var visionModel: String = "gpt-4o"
-    var visionBaseUrl: String = "https://api.openai.com"
-
-    /// 当 true 时，Vision Model 复用 Text Model 的 provider / apiKey / baseUrl，只单独设 model。
-    var visionProviderSameAsText: Bool = true
 
     var asrProvider: String = "same"
     var asrApiKey: String = ""
@@ -37,9 +30,13 @@ struct ShortcutConfig: Codable, Equatable {
 }
 
 struct ShortcutsConfig: Codable, Equatable {
-    var a: ShortcutConfig = .init(role: "A", keyCode: 0, modifierFlags: 0)
-    var b: ShortcutConfig = .init(role: "B", keyCode: 0, modifierFlags: 0)
-    var c: ShortcutConfig = .init(role: "C", keyCode: 0, modifierFlags: 0)
+    /// 默认快捷键：Option + 1/2/3（option rawValue = 524288，键码见 KeyCodes）。
+    private static let optionModifier = Int(NSEvent.ModifierFlags.option.rawValue)
+    private static let keyOne = 0x12, keyTwo = 0x13, keyThree = 0x14
+
+    var a: ShortcutConfig = .init(role: "A", keyCode: keyOne, modifierFlags: optionModifier)
+    var b: ShortcutConfig = .init(role: "B", keyCode: keyTwo, modifierFlags: optionModifier)
+    var c: ShortcutConfig = .init(role: "C", keyCode: keyThree, modifierFlags: optionModifier)
 }
 
 // MARK: - AppSettings (Singleton, persisted via UserDefaults)

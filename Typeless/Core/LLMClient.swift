@@ -319,9 +319,8 @@ final class LLMClient {
     /// 测试连接：发送最小请求验证 provider 可达 + key 有效。
     /// - Parameters:
     ///   - config: LLM 配置
-    ///   - useVisionConfig: true 时测试 Vision Model 配置
     ///   - useASRConfig: true 时测试 ASR Model 配置
-    func testConnection(config: LLMConfig, useVisionConfig: Bool = false, useASRConfig: Bool = false) async -> TestResult {
+    func testConnection(config: LLMConfig, useASRConfig: Bool = false) async -> TestResult {
         let providerRaw: String
         let apiKey: String
         let model: String
@@ -333,12 +332,6 @@ final class LLMClient {
             apiKey = useText ? config.textApiKey : config.asrApiKey
             model = config.asrModel
             baseUrl = useText ? config.textBaseUrl : config.asrBaseUrl
-        } else if useVisionConfig {
-            let useText = config.visionProviderSameAsText
-            providerRaw = useText ? config.textProvider : config.visionProvider
-            apiKey = useText ? config.textApiKey : config.visionApiKey
-            model = config.visionModel
-            baseUrl = useText ? config.textBaseUrl : config.visionBaseUrl
         } else {
             providerRaw = config.textProvider
             apiKey = config.textApiKey

@@ -178,18 +178,16 @@ struct SettingsLLMTab: View {
     @EnvironmentObject private var appSettings: AppSettings
 
     @State private var testingText = false
-    @State private var testingVision = false
     @State private var testingASR = false
     @State private var textTestResult: String?
-    @State private var visionTestResult: String?
     @State private var asrTestResult: String?
 
     var body: some View {
         Form {
             Section("Text Model") {
                 Picker("Provider", selection: $appSettings.llm.textProvider) {
-                    Text("OpenAI").tag("openai")
-                    Text("Anthropic").tag("anthropic")
+                    Text("OpenAI 兼容").tag("openai")
+                    Text("Anthropic 兼容").tag("anthropic")
                 }
                 SecureField("API Key", text: $appSettings.llm.textApiKey)
                 TextField("Model", text: $appSettings.llm.textModel)
@@ -208,41 +206,11 @@ struct SettingsLLMTab: View {
                 }
             }
 
-            Section("Vision Model") {
-                Picker("Provider", selection: $appSettings.llm.visionProvider) {
-                    Text("Same as Text Model").tag("same")
-                    Text("OpenAI").tag("openai")
-                    Text("Anthropic").tag("anthropic")
-                }
-                .onChange(of: appSettings.llm.visionProvider) { newValue in
-                    appSettings.llm.visionProviderSameAsText = (newValue == "same")
-                }
-
-                if appSettings.llm.visionProvider != "same" {
-                    SecureField("API Key", text: $appSettings.llm.visionApiKey)
-                    TextField("Base URL", text: $appSettings.llm.visionBaseUrl)
-                }
-
-                TextField("Model", text: $appSettings.llm.visionModel)
-
-                Button("Test Connection") {
-                    testVisionConnection()
-                }
-                .disabled(testingVision)
-                .buttonStyle(.bordered)
-
-                if let result = visionTestResult {
-                    Text(result)
-                        .font(.caption)
-                        .foregroundColor(result.hasPrefix("✓") ? .green : .red)
-                }
-            }
-
             Section("ASR Model") {
                 Picker("Provider", selection: $appSettings.llm.asrProvider) {
                     Text("Same as Text Model").tag("same")
-                    Text("OpenAI").tag("openai")
-                    Text("Anthropic").tag("anthropic")
+                    Text("OpenAI 兼容").tag("openai")
+                    Text("Anthropic 兼容").tag("anthropic")
                 }
                 .onChange(of: appSettings.llm.asrProvider) { newValue in
                     appSettings.llm.asrProviderSameAsText = (newValue == "same")
@@ -275,22 +243,10 @@ struct SettingsLLMTab: View {
         testingText = true
         textTestResult = nil
         Task {
-            let result = await LLMClient().testConnection(config: appSettings.llm, useVisionConfig: false)
+            let result = await LLMClient().testConnection(config: appSettings.llm)
             await MainActor.run {
                 textTestResult = (result.ok ? "✓ " : "✗ ") + result.message
                 testingText = false
-            }
-        }
-    }
-
-    private func testVisionConnection() {
-        testingVision = true
-        visionTestResult = nil
-        Task {
-            let result = await LLMClient().testConnection(config: appSettings.llm, useVisionConfig: true)
-            await MainActor.run {
-                visionTestResult = (result.ok ? "✓ " : "✗ ") + result.message
-                testingVision = false
             }
         }
     }
