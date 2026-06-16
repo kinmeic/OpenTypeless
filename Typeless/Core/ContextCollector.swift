@@ -1,5 +1,7 @@
 import Foundation
 import ApplicationServices
+import AppKit
+import CoreGraphics
 import os.log
 
 private let logger = Logger(subsystem: "com.opentypeless.app", category: "context")
@@ -23,6 +25,9 @@ final class ContextCollector {
         if let axText = axSelectedText() {
             ctx.selectedText = axText
             logger.info("Selected text via AX: \(axText.count) chars")
+        } else if let copiedText = await selectedTextViaTemporaryCopy() {
+            ctx.selectedText = copiedText
+            logger.info("Selected text via temporary copy: \(copiedText.count) chars")
         } else if AXIsProcessTrusted() {
             logger.warning("No selected text available through AX")
         } else {
@@ -171,5 +176,87 @@ final class ContextCollector {
     private func nonEmpty(_ text: String) -> String? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : text
+    }
+
+    // MARK: - Copy Fallback
+
+    /// AX does not expose normal text selections in many apps such as browsers and code editors.
+    /// Fall back to a temporary copy, then restore the user's clipboard.
+    private func selectedTextViaTemporaryCopy() async -> String? {
+        guard AXIsProcessTrusted() else { return nil }
+
+        let pasteboard = NSPasteboard.general
+        let snapshot = savePasteboard(pasteboard)
+        let beforeChangeCount = pasteboard.changeCount
+
+        // Let the shortcut keys that started recording finish releasing before posting Cmd+C.
+        try? await Task.sleep(for: .milliseconds(180))
+        simulateCmdC()
+        try? await Task.sleep(for: .milliseconds(160))
+
+        let copiedText: String?
+        if pasteboard.changeCount != beforeChangeCount {
+            copiedText = nonEmpty(pasteboard.string(forType: .string) ?? "")
+        } else {
+            copiedText = nil
+        }
+        restorePasteboard(snapshot, to: pasteboard)
+        return copiedText
+    }
+
+    private struct PasteboardSnapshot {
+        let items: [[NSPasteboard.PasteboardType: Data]]
+    }
+
+    private func savePasteboard(_ pasteboard: NSPasteboard) -> PasteboardSnapshot {
+        let items = pasteboard.pasteboardItems?.map { item -> [NSPasteboard.PasteboardType: Data] in
+            Dictionary(uniqueKeysWithValues: item.types.compactMap { type -> (NSPasteboard.PasteboardType, Data)? in
+                guard let data = item.data(forType: type) else { return nil }
+                return (type, data)
+            })
+        } ?? []
+        return PasteboardSnapshot(items: items)
+    }
+
+    private func restorePasteboard(_ snapshot: PasteboardSnapshot, to pasteboard: NSPasteboard) {
+        pasteboard.clearContents()
+        let items = snapshot.items.map { dict -> NSPasteboardItem in
+            let item = NSPasteboardItem()
+            for (type, data) in dict {
+                item.setData(data, forType: type)
+            }
+            return item
+        }
+        if items.isEmpty == false {
+            pasteboard.writeObjects(items)
+        }
+    }
+
+    private func simulateCmdC() {
+        let source = CGEventSource(stateID: .hidSystemState)
+        guard let source else {
+            logger.error("CGEventSource creation failed")
+            return
+        }
+
+        let cmdKeyCode: CGKeyCode = 0x37
+        let cKeyCode: CGKeyCode = 0x08
+
+        guard let cmdDown = CGEvent(keyboardEventSource: source, virtualKey: cmdKeyCode, keyDown: true),
+              let cDown = CGEvent(keyboardEventSource: source, virtualKey: cKeyCode, keyDown: true),
+              let cUp = CGEvent(keyboardEventSource: source, virtualKey: cKeyCode, keyDown: false),
+              let cmdUp = CGEvent(keyboardEventSource: source, virtualKey: cmdKeyCode, keyDown: false)
+        else {
+            logger.error("CGEvent creation failed")
+            return
+        }
+
+        cDown.flags = .maskCommand
+        cUp.flags = .maskCommand
+
+        cmdDown.post(tap: .cghidEventTap)
+        cDown.post(tap: .cghidEventTap)
+        cUp.post(tap: .cghidEventTap)
+        cmdUp.post(tap: .cghidEventTap)
     }
 }

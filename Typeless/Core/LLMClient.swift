@@ -141,15 +141,15 @@ final class LLMClient {
 
         let systemPrompt = """
         You are a helpful assistant. The user spoke an instruction. \
-        If there is selected text from the active app, apply the spoken instruction to that text. \
-        If there is no selected text, simply answer or execute the spoken instruction directly. \
+        If there is selected or temporarily copied text from the active app, apply the spoken instruction to that text. \
+        If there is no selected/copied text, simply answer or execute the spoken instruction directly. \
         Respond in the same language the user spoke.
         """
 
         var userContent = "Spoken instruction: \(transcription)"
 
         if let selected = context.selectedText, selected.isEmpty == false {
-            userContent += "\n\nSelected text: \(selected)"
+            userContent += "\n\nSelected/copied text: \(selected)"
         }
 
         let messages: [[String: Any]] = [

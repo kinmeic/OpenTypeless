@@ -52,16 +52,15 @@ final class KeyboardMonitor: ObservableObject {
         let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
-            options: .listenOnly,
+            options: .defaultTap,
             eventsOfInterest: CGEventMask(mask),
             callback: { proxy, type, event, info in
                 guard let info else { return Unmanaged.passUnretained(event) }
                 let me = Unmanaged<KeyboardMonitor>.fromOpaque(info).takeUnretainedValue()
-                // CGEventTap callback runs on a dedicated thread, dispatch to main actor
-                Task { @MainActor in
+                let shouldConsume = MainActor.assumeIsolated {
                     me.handleEvent(type: type, event: event)
                 }
-                return Unmanaged.passUnretained(event)
+                return shouldConsume ? nil : Unmanaged.passUnretained(event)
             },
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         )
@@ -100,7 +99,8 @@ final class KeyboardMonitor: ObservableObject {
 
     // MARK: - Event Handling
 
-    private func handleEvent(type: CGEventType, event: CGEvent) {
+    /// Returns true when the original event should be swallowed.
+    private func handleEvent(type: CGEventType, event: CGEvent) -> Bool {
         let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
         let normalizedFlags = NSEvent.ModifierFlags(rawValue: UInt(event.flags.rawValue))
             .intersection(shortcutModifierMask)
@@ -108,8 +108,14 @@ final class KeyboardMonitor: ObservableObject {
 
         switch type {
         case .keyDown:
+            let wasAlreadyPressed = pressingKeyCodes.contains(keyCode)
             pressingKeyCodes.insert(keyCode)
-            checkMatch(keyCode: keyCode)
+            if let match = matchedShortcutEvent(keyCode: keyCode) {
+                if wasAlreadyPressed == false {
+                    onShortcut?(match)
+                }
+                return true
+            }
 
         case .keyUp:
             pressingKeyCodes.remove(keyCode)
@@ -117,15 +123,19 @@ final class KeyboardMonitor: ObservableObject {
         case .flagsChanged:
             // Some shortcuts are modifier-only (e.g. just Option), check those too
             if pressingKeyCodes.isEmpty {
-                checkMatch(keyCode: nil)
+                if let match = matchedShortcutEvent(keyCode: nil) {
+                    onShortcut?(match)
+                    return true
+                }
             }
 
         default:
             break
         }
+        return false
     }
 
-    private func checkMatch(keyCode: Int?) {
+    private func matchedShortcutEvent(keyCode: Int?) -> ShortcutEvent? {
         for shortcut in shortcuts {
             let targetModifiers = NSEvent.ModifierFlags(rawValue: UInt(shortcut.modifierFlags))
                 .intersection(shortcutModifierMask)
@@ -138,16 +148,15 @@ final class KeyboardMonitor: ObservableObject {
 
             let keyName = KeyCodes.name(for: targetKeyCode) ?? "\(targetKeyCode)"
             let shortcutString = shortcutDisplay(modifiers: targetModifiers, key: keyName)
-            let event = ShortcutEvent(
+            return ShortcutEvent(
                 keyCode: targetKeyCode,
                 keyName: keyName,
                 modifiers: pressingModifiers,
                 matchedShortcut: shortcutString,
                 role: shortcut.role
             )
-            onShortcut?(event)
-            return // match one at a time
         }
+        return nil
     }
 
     private func shortcutDisplay(modifiers: NSEvent.ModifierFlags, key: String) -> String {
