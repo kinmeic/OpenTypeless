@@ -198,8 +198,10 @@ struct PermissionRow: View {
                 .popover(isPresented: $showHelp, arrowEdge: .top) {
                     Text(helpText)
                         .font(.caption)
-                        .padding(10)
-                        .frame(maxWidth: 320)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(12)
+                        .frame(maxWidth: 360)
                 }
             }
             Spacer()
