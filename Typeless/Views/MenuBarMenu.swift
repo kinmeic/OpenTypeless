@@ -7,11 +7,6 @@ struct MenuBarMenu: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        // Recording status
-        statusSection
-
-        Divider()
-
         // Audio input submenu
         audioInputSection
 
@@ -28,51 +23,6 @@ struct MenuBarMenu: View {
     }
 
     // MARK: - Subviews
-
-    @ViewBuilder
-    private var statusSection: some View {
-        if let (statusText, icon, color) = statusInfo {
-            Label(statusText, systemImage: icon)
-                .foregroundColor(color)
-        }
-
-        if let error = pipeline.lastError {
-            HStack {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(.red)
-                Text(error)
-                    .font(.caption)
-                    .lineLimit(2)
-                    .foregroundColor(.red)
-                Spacer()
-                Button("Dismiss") {
-                    pipeline.clearError()
-                    NotificationManager.shared.clearError()
-                }
-                .buttonStyle(.plain)
-                .font(.caption)
-            }
-            .padding(.vertical, 2)
-        }
-    }
-
-    /// 仅在录音 / 处理中时返回状态文案；idle 时不显示。
-    private var statusInfo: (String, String, Color)? {
-        switch pipeline.phase {
-        case .idle:
-            return nil
-        case .recording:
-            return ("Recording... (press shortcut to stop)", "mic.circle.fill", .red)
-        case .processing(let action):
-            let actionName: String
-            switch action {
-            case .dictate: actionName = "Dictating"
-            case .translate: actionName = "Translating"
-            case .assist: actionName = "Assisting"
-            }
-            return ("\(actionName)...", "gearshape.fill", .orange)
-        }
-    }
 
     @ViewBuilder
     private var audioInputSection: some View {
