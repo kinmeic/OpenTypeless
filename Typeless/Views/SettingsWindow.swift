@@ -413,6 +413,9 @@ struct ShortcutRecorder: View {
             .buttonStyle(.bordered)
             .tint(isRecording ? .yellow : .accentColor)
         }
+        .onDisappear {
+            stopRecording()
+        }
     }
 
     private func startRecording() {

@@ -245,7 +245,7 @@ final class LLMClient {
         }
 
         // 网络层与 HTTP 状态码层做重试（瞬时故障：断网/超时/5xx/408/429），响应解析错误不重试。
-        let (data, response) = try await NetworkRetry.perform(
+        let (data, _) = try await NetworkRetry.perform(
             isRetryable: { error in
                 if NetworkRetry.isRetryableError(error) { return true }
                 if case LLMError.requestFailed(let desc) = error,
@@ -257,8 +257,7 @@ final class LLMClient {
             operation: {
                 let (d, r) = try await self.session.data(for: request)
                 if let http = r as? HTTPURLResponse, (200..<300).contains(http.statusCode) == false {
-                    let bodyText = String(data: d, encoding: .utf8) ?? "(binary)"
-                    throw LLMError.requestFailed("HTTP \(http.statusCode): \(String(bodyText.prefix(300)))")
+                    throw LLMError.requestFailed("HTTP \(http.statusCode)")
                 }
                 return (d, r)
             }
@@ -384,9 +383,8 @@ final class LLMClient {
             baseUrl = config.textBaseUrl
         }
 
-        let provider = Provider(rawValue: providerRaw) ?? .openai
-
         do {
+            let provider = try resolveProvider(providerRaw)
             _ = try await chatCompletion(
                 provider: provider,
                 baseUrl: baseUrl,

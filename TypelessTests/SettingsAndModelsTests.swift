@@ -266,6 +266,11 @@ final class SettingsAndModelsTests: XCTestCase {
         XCTAssertFalse(NetworkRetry.isRetryableError(error))
     }
 
+    func testIsRetryableError_BadURL() {
+        let error = NSError(domain: NSURLErrorDomain, code: NSURLErrorBadURL)
+        XCTAssertFalse(NetworkRetry.isRetryableError(error))
+    }
+
     func testIsRetryableError_ConnectionLost() {
         let error = NSError(domain: NSURLErrorDomain, code: NSURLErrorNetworkConnectionLost)
         XCTAssertTrue(NetworkRetry.isRetryableError(error))

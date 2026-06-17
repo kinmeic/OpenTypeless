@@ -123,7 +123,7 @@ final class LLMASR: ASREngine {
         )
         request.httpBody = body
 
-        let (data, response) = try await NetworkRetry.perform(
+        let (data, _) = try await NetworkRetry.perform(
             isRetryable: { error in
                 if NetworkRetry.isRetryableError(error) { return true }
                 if case ASError.requestFailed(let desc) = error,
@@ -135,8 +135,7 @@ final class LLMASR: ASREngine {
             operation: {
                 let (d, r) = try await self.session.data(for: request)
                 if let http = r as? HTTPURLResponse, (200..<300).contains(http.statusCode) == false {
-                    let bodyText = String(data: d, encoding: .utf8) ?? "(binary)"
-                    throw ASError.requestFailed("HTTP \(http.statusCode): \(String(bodyText.prefix(300)))")
+                    throw ASError.requestFailed("HTTP \(http.statusCode)")
                 }
                 return (d, r)
             }
@@ -197,7 +196,7 @@ final class LLMASR: ASREngine {
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await NetworkRetry.perform(
+        let (data, _) = try await NetworkRetry.perform(
             isRetryable: { error in
                 if NetworkRetry.isRetryableError(error) { return true }
                 if case ASError.requestFailed(let desc) = error,
@@ -209,8 +208,7 @@ final class LLMASR: ASREngine {
             operation: {
                 let (d, r) = try await self.session.data(for: request)
                 if let http = r as? HTTPURLResponse, (200..<300).contains(http.statusCode) == false {
-                    let bodyText = String(data: d, encoding: .utf8) ?? "(binary)"
-                    throw ASError.requestFailed("HTTP \(http.statusCode): \(String(bodyText.prefix(300)))")
+                    throw ASError.requestFailed("HTTP \(http.statusCode)")
                 }
                 return (d, r)
             }

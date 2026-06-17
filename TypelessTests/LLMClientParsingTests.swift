@@ -152,6 +152,20 @@ final class LLMClientParsingTests: XCTestCase {
         XCTAssertThrowsError(try client.resolveProvider(""))
     }
 
+    func testTestConnection_UnknownProviderFailsBeforeRequest() async {
+        var config = LLMConfig()
+        config.textProvider = "mistral"
+        config.textApiKey = "secret"
+        config.textModel = "mistral-large"
+        config.textBaseUrl = "https://api.example.invalid"
+
+        let result = await client.testConnection(config: config)
+
+        XCTAssertFalse(result.ok)
+        XCTAssertTrue(result.message.contains("Unknown LLM provider"))
+        XCTAssertTrue(result.message.contains("mistral"))
+    }
+
     // MARK: - validateASRSettings
 
     func testValidateASR_EmptyApiKey() {

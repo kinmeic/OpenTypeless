@@ -34,13 +34,7 @@ final class Pipeline: ObservableObject {
     typealias TestOutputHandler = @MainActor (String) -> Void
 
     @Published private(set) var phase: Phase = .idle
-    @Published private(set) var lastError: String? {
-        didSet {
-            if let error = lastError {
-                NotificationManager.shared.showError(title: "OpenTypeless Error", message: error)
-            }
-        }
-    }
+    @Published private(set) var lastError: String?
     @Published private(set) var inputLevel: Double = 0
     @Published private(set) var lastTranscript: String?
 
@@ -182,7 +176,7 @@ final class Pipeline: ObservableObject {
             RecordingOverlay.shared.show(pipeline: self)
         } catch {
             logger.error("Failed to start recording: \(error.localizedDescription)")
-            lastError = error.localizedDescription
+            setError(error)
             phase = .idle
             recordingStartContext = nil
             recordingStartTime = nil
@@ -240,6 +234,8 @@ final class Pipeline: ObservableObject {
                 if textModelConfigured {
                     do {
                         finalText = try await llm.refine(text, using: settings.llm)
+                    } catch where isConfigurationError(error) {
+                        throw error
                     } catch {
                         logger.warning("Refine failed, using raw transcript: \(error.localizedDescription)")
                         finalText = text
@@ -275,7 +271,31 @@ final class Pipeline: ObservableObject {
             }
         } catch {
             logger.error("Processing failed: \(error.localizedDescription)")
-            lastError = error.localizedDescription
+            setError(error)
+        }
+    }
+
+    private func setError(_ error: Error) {
+        let message = error.localizedDescription
+        lastError = message
+        if shouldNotify(error) {
+            NotificationManager.shared.showError(title: "OpenTypeless Error", message: message)
+        }
+    }
+
+    private func shouldNotify(_ error: Error) -> Bool {
+        isConfigurationError(error) == false
+    }
+
+    private func isConfigurationError(_ error: Error) -> Bool {
+        switch error {
+        case LLMClient.LLMError.notConfigured,
+             LLMClient.LLMError.unknownProvider,
+             LLMASR.ASError.notConfigured,
+             LLMASR.ASError.unsupportedProvider:
+            return true
+        default:
+            return false
         }
     }
 

@@ -163,6 +163,7 @@ final class Permissions: ObservableObject {
         }
 
         CGEvent.tapEnable(tap: tap, enable: false)
+        CFMachPortInvalidate(tap)
         logger.info("Input Monitoring probe event tap created")
     }
 
@@ -200,87 +201,8 @@ final class Permissions: ObservableObject {
     // MARK: - Audio Devices
 
     private func listAudioInputDevices() -> [AudioDevice] {
-        var propertyAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDevices,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var size: UInt32 = 0
-        var status = AudioObjectGetPropertyDataSize(
-            AudioObjectID(kAudioObjectSystemObject),
-            &propertyAddress,
-            0,
-            nil,
-            &size
-        )
-        guard status == noErr else { return [] }
-
-        let deviceCount = Int(size) / MemoryLayout<AudioDeviceID>.size
-        var deviceIDs = [AudioDeviceID](repeating: 0, count: deviceCount)
-        status = AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject),
-            &propertyAddress,
-            0,
-            nil,
-            &size,
-            &deviceIDs
-        )
-        guard status == noErr else { return [] }
-
-        var devices: [AudioDevice] = []
-        for id in deviceIDs {
-            let isInput = deviceHasInputStreams(deviceID: id)
-            guard isInput else { continue }
-            let name = getPropertyString(deviceID: id, selector: kAudioObjectPropertyName) ?? "Unknown"
-            devices.append(AudioDevice(id: "\(id)", name: name, deviceID: id))
+        AudioDeviceManager.inputDevices().map { device in
+            AudioDevice(id: "\(device.id)", name: device.name, deviceID: device.id)
         }
-        return devices
-    }
-
-    private func deviceHasInputStreams(deviceID: AudioDeviceID) -> Bool {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyStreamConfiguration,
-            mScope: kAudioObjectPropertyScopeInput,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var size: UInt32 = 0
-        let status = AudioObjectGetPropertyDataSize(deviceID, &address, 0, nil, &size)
-        guard status == noErr, size > 0 else { return false }
-        
-        var mutableSize = size
-        guard let rawBuffer = malloc(Int(size)) else { return false }
-        defer { free(rawBuffer) }
-
-        let getStatus = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &mutableSize, rawBuffer)
-        guard getStatus == noErr else { return false }
-
-        let bufferList = UnsafeMutableAudioBufferListPointer(rawBuffer.assumingMemoryBound(to: AudioBufferList.self))
-        let channelCount = bufferList.reduce(0) { $0 + Int($1.mNumberChannels) }
-        return channelCount > 0
-    }
-
-    private func getPropertyBool(deviceID: AudioDeviceID, selector: AudioObjectPropertySelector) -> Bool {
-        var address = AudioObjectPropertyAddress(
-            mSelector: selector,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var value: UInt32 = 0
-        var size = UInt32(MemoryLayout<UInt32>.size)
-        let status = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &value)
-        return status == noErr && value != 0
-    }
-
-    private func getPropertyString(deviceID: AudioDeviceID, selector: AudioObjectPropertySelector) -> String? {
-        var address = AudioObjectPropertyAddress(
-            mSelector: selector,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var cfString: Unmanaged<CFString>?
-        var size = UInt32(MemoryLayout<CFString?>.size)
-        let status = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &cfString)
-        guard status == noErr else { return nil }
-        return cfString?.takeRetainedValue() as String?
     }
 }

@@ -45,8 +45,8 @@ enum NetworkRetry {
     /// 判定一个错误是否为可重试的网络/服务端瞬时故障。
     ///
     /// 命中条件（满足任一）：
-    /// - `URLError` 且非用户取消类（如超时、断网、连接重置、DNS 失败等）；
-    /// - 包装在错误描述中的 HTTP 5xx / 408 / 429 状态码（由调用方在包装错误时带上 "HTTP <code>" 前缀）。
+    /// - 显式列出的瞬时 `URLError`（如超时、断网、连接重置、DNS 失败等）；
+    /// - 包装在错误描述中的 HTTP 5xx / 408 / 429 状态码（由调用方在包装错误时带上 "HTTP <code>"）。
     ///
     /// 调用方应针对自己的错误类型提供更精确的 `isRetryable`，本函数作为通用兜底。
     static func isRetryableError(_ error: Error) -> Bool {
@@ -65,11 +65,10 @@ enum NetworkRetry {
                  NSURLErrorDataNotAllowed,
                  NSURLErrorSecureConnectionFailed:
                 return true
-            // 用户主动取消不重试
             case NSURLErrorCancelled:
                 return false
             default:
-                return true
+                return false
             }
         }
         return false
