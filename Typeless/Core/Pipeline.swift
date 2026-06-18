@@ -259,8 +259,23 @@ final class Pipeline: ObservableObject {
                 }
 
             case .translate:
-                // B：翻译后注入
-                let translated = try await translate(text)
+                // B：先加工（去填充词/重复），再翻译，最后注入
+                // 加工与翻译拆成两次调用：翻译用独立的、不与 refinePrompt 冲突的 prompt，
+                // 避免「不得添加未口述字符」与「翻译成目标语言」互相矛盾导致间歇性不翻译。
+                let refined: String
+                if textModelConfigured {
+                    do {
+                        refined = try await llm.refine(text, using: settings.llm)
+                    } catch where isConfigurationError(error) {
+                        throw error
+                    } catch {
+                        logger.warning("Refine before translate failed, using raw transcript: \(error.localizedDescription)")
+                        refined = text
+                    }
+                } else {
+                    refined = text
+                }
+                let translated = try await translate(refined)
                 if let testOutput {
                     testOutput(translated)
                 } else {

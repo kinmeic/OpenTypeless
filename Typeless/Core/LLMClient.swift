@@ -74,6 +74,23 @@ final class LLMClient {
     Output requirement: return only the processed text itself, with no explanations, no prefixes or suffixes, and no answers to any questions found in the input.
     """
 
+    /// 纯翻译提示词（B 键 translate 的第二步）。
+    /// 刻意不复用 refinePrompt：refinePrompt 的 rule 6「不得添加任何未口述字符」与翻译任务
+    /// 本身冲突——翻译必然要把源语言字符替换为目标语言字符。把两者拼在一起会导致模型在
+    /// 两条矛盾约束间摇摆，间歇性输出未翻译的原文。
+    /// 翻译前的「去填充词/重复」整理已由 refine() 单独完成，这里只负责忠实翻译。
+    private static let translatePrompt = """
+    You are a professional translator. Translate the given text into {language}.
+
+    Rules:
+    1. Preserve the original meaning, tone, and level of formality.
+    2. Produce natural, fluent {language} — not a word-for-word translation.
+    3. You may drop obvious spoken fillers and meaningless repetition that survived upstream cleanup (e.g. "uh", "um", "like", stutters), but do not otherwise alter the content or add information.
+    4. If the text is already in {language}, return it unchanged.
+
+    Output requirement: return only the translated text, with no explanations, no prefixes or suffixes, and no quotation marks.
+    """
+
     // MARK: - Refine (Text Model, A key 后处理)
 
     /// 加工语音转写文字：去填充词、去重复、结构化整理。
@@ -105,6 +122,7 @@ final class LLMClient {
     // MARK: - Translate (Text Model, B key)
 
     /// 翻译文本到目标语言。
+    /// 注意：调用方应先经 refine() 做口语整理，这里只负责忠实翻译。
     func translate(_ text: String, to targetLanguage: String, using config: LLMConfig) async throws -> String {
         let apiKey = config.textApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard apiKey.isEmpty == false || isLocalProvider(config.textProvider) else {
@@ -112,7 +130,8 @@ final class LLMClient {
         }
 
         let provider = try resolveProvider(config.textProvider)
-        let systemPrompt = Self.refinePrompt + "\nAdditionally, translate the processed text into \(targetLanguage). If the original is already in \(targetLanguage), keep it unchanged. Return only the final processed and translated result, with no explanations or prefixes/suffixes."
+        let systemPrompt = Self.translatePrompt
+            .replacingOccurrences(of: "{language}", with: targetLanguage)
 
         let messages: [[String: Any]] = [
             ["role": "system", "content": systemPrompt],
