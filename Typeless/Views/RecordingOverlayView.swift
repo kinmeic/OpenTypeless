@@ -20,7 +20,7 @@ struct RecordingOverlayView: View {
 
                 Spacer()
 
-                Text("Press shortcut to stop")
+                Text("Shortcut: stop · Esc: cancel")
                     .font(.caption)
                     .foregroundColor(.white.opacity(0.7))
             }

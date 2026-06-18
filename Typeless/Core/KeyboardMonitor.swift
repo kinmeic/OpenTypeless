@@ -27,12 +27,28 @@ final class KeyboardMonitor: ObservableObject {
     private let installRetryInterval: TimeInterval = 30
     private let installFailureLogInterval: TimeInterval = 30
 
+    /// Escape 键虚拟键码（HIToolbox 0x35，与 KeyCodes.map 一致）。
+    private let escapeKeyCode = 0x35
+
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var healthCheckTimer: Timer?
     private var didBecomeActiveObserver: NSObjectProtocol?
     private var onShortcut: ((ShortcutEvent) -> Void)?
+
+    /// Pipeline 在进入/离开录音态时切换此标志；录音中按裸 Esc 触发 onCancel。
+    var isRecording = false
+
+    /// 录音中按裸 Esc 的回调（吞掉该按键，不透传给前台 App）。
+    /// 回调内部的实际工作应异步执行，避免阻塞 CGEvent tap 回调。
+    var onCancel: (() -> Void)?
+
     private var isMonitoring = false
+
+    /// 标记“本轮 Esc 取消”已被消费。
+    /// 首次按 Esc 触发取消并置为 true；长按产生的重复 keyDown 继续被吞掉，
+    /// 直到 Esc keyUp 才清除——避免长按时后续 repeat 事件穿透到前台 App。
+    private var escCancelConsumed = false
     private var lastInstallAttemptTime = Date.distantPast
     private var lastInstallFailureLogTime = Date.distantPast
 
@@ -82,6 +98,7 @@ final class KeyboardMonitor: ObservableObject {
     func reset() {
         pressingModifiers = []
         pressingKeyCodes.removeAll()
+        escCancelConsumed = false
     }
 
     // MARK: - Event Tap Lifecycle
@@ -266,6 +283,23 @@ final class KeyboardMonitor: ObservableObject {
 
         switch type {
         case .keyDown:
+            // 录音中按裸 Esc（无修饰键）→ 取消录音，并吞掉该按键，避免穿透到前台 App。
+            // 非录音态 Esc 照常透传，行为不变。
+            if keyCode == escapeKeyCode && normalizedFlags.isEmpty {
+                if escCancelConsumed {
+                    // 长按产生的重复 keyDown：继续吞掉，避免穿透到前台 App
+                    return true
+                }
+                if isRecording {
+                    escCancelConsumed = true
+                    // 异步触发取消逻辑：event tap 回调须尽快返回，否则 macOS 可能
+                    // 因超时临时禁用 tap。吞掉事件的决策(return true)本身是同步的。
+                    let onCancel = self.onCancel
+                    Task { @MainActor in onCancel?() }
+                    return true
+                }
+            }
+
             let wasAlreadyPressed = pressingKeyCodes.contains(keyCode)
             pressingKeyCodes.insert(keyCode)
             if let match = matchedShortcutEvent(keyCode: keyCode) {
@@ -276,6 +310,9 @@ final class KeyboardMonitor: ObservableObject {
             }
 
         case .keyUp:
+            if keyCode == escapeKeyCode {
+                escCancelConsumed = false
+            }
             pressingKeyCodes.remove(keyCode)
 
         case .flagsChanged:

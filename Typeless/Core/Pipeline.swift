@@ -73,6 +73,10 @@ final class Pipeline: ObservableObject {
             let action = self.action(from: event)
             self.handleShortcut(action: action)
         }
+        // 录音中按裸 Esc → 取消录音（丢弃音频、不转写、不注入）
+        monitor.onCancel = { [weak self] in
+            self?.cancelRecording()
+        }
         // 监听应用退出，确保静音/录音资源被恢复和释放。
         // 闭包已在 main queue 上同步执行，stop() 是 @MainActor 方法可直接调用；
         // 不要用 Task 异步调度——willTerminate 后 RunLoop 不保证 drain，stop() 可能来不及执行。
@@ -118,6 +122,7 @@ final class Pipeline: ObservableObject {
 
     func stop() {
         monitor.stop()
+        monitor.isRecording = false
         recorder.stop()
         // 确保静音被恢复（退出/释放时若仍在录音状态）
         audioMuter.restore()
@@ -171,6 +176,7 @@ final class Pipeline: ObservableObject {
             )
 
             phase = .recording
+            monitor.isRecording = true
             startSilenceDetection()
             // 显示录音浮层
             RecordingOverlay.shared.show(pipeline: self)
@@ -189,6 +195,9 @@ final class Pipeline: ObservableObject {
     private func stopAndProcess(action: Action, testOutput: TestOutputHandler? = nil) async {
         guard phase == .recording else { return }
         logger.info("Stopping recording, action=\(action.rawValue)")
+
+        // 退出录音态：停止 Esc 取消监听
+        monitor.isRecording = false
 
         // 停止录音和静音检测
         silenceTimer?.invalidate()
@@ -273,6 +282,40 @@ final class Pipeline: ObservableObject {
             logger.error("Processing failed: \(error.localizedDescription)")
             setError(error)
         }
+    }
+
+    /// 取消录音：丢弃已录音频，不转写、不注入，直接回到 idle。
+    /// 与 startRecording 对称地释放资源；不显示 ProcessingOverlay，也不走 stopAndProcess。
+    private func cancelRecording() {
+        guard phase == .recording else { return }
+        logger.info("Recording cancelled by Esc")
+
+        // 退出录音态：停止 Esc 取消监听
+        monitor.isRecording = false
+        // 取消可能挂起的 startRecording Task（与 stopAndProcess 入口对称）
+        recordingTask?.cancel()
+        recordingTask = nil
+
+        // 停止录音采集与静音检测
+        silenceTimer?.invalidate()
+        silenceTimer = nil
+        recorder.stop()
+        inputLevel = 0
+
+        // 隐藏浮层
+        RecordingOverlay.shared.hide()
+
+        // 恢复系统输出 + 取消提示音（区别于 start/end）
+        audioMuter.restore()
+        if settings.playInteractionSound { soundFeedback.playCancel() }
+
+        // 清空录音上下文与临时文件
+        recordingStartContext = nil
+        recordingStartTime = nil
+        lastVoiceTime = nil
+        cleanupRecordingFile()
+
+        phase = .idle
     }
 
     private func setError(_ error: Error) {
